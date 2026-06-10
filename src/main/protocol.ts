@@ -1,7 +1,7 @@
 import { protocol } from 'electron';
 import { promises as fs } from 'node:fs';
 import { mimeForPath } from './lib/mime.js';
-import { resolveWithinRoot } from './lib/path-guard.js';
+import { resolveWithinRootReal } from './lib/path-guard.js';
 
 export const REDRA_SCHEME = 'redra';
 
@@ -60,7 +60,8 @@ export function installRedraProtocolHandler(getDoc: (docId: string) => ServedDoc
       });
     }
 
-    const resolved = resolveWithinRoot(doc.dir, rest);
+    // realpath-aware: a symlink inside the doc dir must not escape it.
+    const resolved = await resolveWithinRootReal(doc.dir, rest);
     if (resolved === null) return new Response('Forbidden', { status: 403 });
 
     try {
