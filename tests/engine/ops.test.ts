@@ -25,13 +25,27 @@ const OPS_HTML = `<!DOCTYPE html>
 </body></html>
 `;
 
-/** Resolve the rN id of the element whose HTML id attribute is domId. */
-function rid(doc: RedraDoc, domId: string): string {
+/** Resolve the rN id of the first element matching `pred`, in document order. */
+function findId(doc: RedraDoc, pred: (el: Element) => boolean, what: string): string {
   for (let i = 0; ; i++) {
     const el = getElementById(doc, `r${i}`);
-    if (!el) throw new Error(`no element with id="${domId}" in fixture`);
-    if (el.attrs.some((a) => a.name === 'id' && a.value === domId)) return `r${i}`;
+    if (!el) throw new Error(`no element matching ${what} in fixture`);
+    if (pred(el)) return `r${i}`;
   }
+}
+
+/** Resolve the rN id of the element whose HTML id attribute is domId. */
+function rid(doc: RedraDoc, domId: string): string {
+  return findId(
+    doc,
+    (el) => el.attrs.some((a) => a.name === 'id' && a.value === domId),
+    `id="${domId}"`,
+  );
+}
+
+/** Resolve the rN id of the first element with the given tag name. */
+function tagId(doc: RedraDoc, tagName: string): string {
+  return findId(doc, (el) => el.tagName === tagName, `<${tagName}>`);
 }
 
 /** Children of <body> in the serialized output, reparsed. */
@@ -122,14 +136,8 @@ describe('moveBlock', () => {
   it('moves an element down (before a later sibling)', () => {
     const doc = parseDocument(OPS_HTML);
     // move p#a before the table
-    let tableId: string | undefined;
-    for (let i = 0; ; i++) {
-      const el = getElementById(doc, `r${i}`);
-      if (!el) break;
-      if (el.tagName === 'table') tableId = `r${i}`;
-    }
     const out = serializeSource(doc, [
-      { type: 'moveBlock', id: rid(doc, 'a'), beforeId: tableId! },
+      { type: 'moveBlock', id: rid(doc, 'a'), beforeId: tagId(doc, 'table') },
     ]);
     expect(out.indexOf('id="b"')).toBeLessThan(out.indexOf('id="a"'));
     expect(out.indexOf('id="c"')).toBeLessThan(out.indexOf('id="a"'));
@@ -157,6 +165,65 @@ describe('moveBlock', () => {
   });
 });
 
+/** Fixture with a <template> in the body (parse5 keeps its children in el.content). */
+const TEMPLATE_HTML = `<!DOCTYPE html>
+<html><head><title>tpl fixture</title></head><body>
+<template id="tpl"><p id="tp">tpl old</p></template>
+<p id="after">after</p>
+</body></html>
+`;
+
+describe('template elements', () => {
+  it('editText on a <template> replaces its content (old content gone)', () => {
+    const doc = parseDocument(TEMPLATE_HTML);
+    const out = serializeSource(doc, [
+      { type: 'editText', id: rid(doc, 'tpl'), html: '<p>fresh</p>' },
+    ]);
+    expect(out).toContain('<template id="tpl"><p>fresh</p></template>');
+    expect(out).not.toContain('tpl old');
+    expect(out).not.toContain('id="tp"');
+    expect(out).toContain('<p id="after">after</p>');
+  });
+
+  it('deleteBlock of a template marks its content removed — later editText inside throws', () => {
+    const doc = parseDocument(TEMPLATE_HTML);
+    expect(() =>
+      serializeSource(doc, [
+        { type: 'deleteBlock', id: rid(doc, 'tpl') },
+        { type: 'editText', id: rid(doc, 'tp'), html: 'x' },
+      ]),
+    ).toThrowError(/editText.*removed/);
+  });
+
+  it('editText replacing template content marks the old content removed', () => {
+    const doc = parseDocument(TEMPLATE_HTML);
+    expect(() =>
+      serializeSource(doc, [
+        { type: 'editText', id: rid(doc, 'tpl'), html: '<p>new</p>' },
+        { type: 'editText', id: rid(doc, 'tp'), html: 'x' },
+      ]),
+    ).toThrowError(/editText.*removed/);
+  });
+});
+
+describe('editText strips data-redra-id from fragments', () => {
+  it('saved output has no data-redra-id, including template content inside the fragment', () => {
+    const doc = parseDocument(OPS_HTML);
+    const out = serializeSource(doc, [
+      {
+        type: 'editText',
+        id: rid(doc, 'c'),
+        html:
+          '<b data-redra-id="r7">x</b>' +
+          '<template data-redra-id="r8"><i data-redra-id="r9">y</i></template>',
+      },
+    ]);
+    expect(out).not.toContain('data-redra-id');
+    expect(out).toContain('<b>x</b>');
+    expect(out).toContain('<template><i>y</i></template>');
+  });
+});
+
 describe('error handling (RedraOpError)', () => {
   it('throws on an unknown id, naming the op type and id', () => {
     const doc = parseDocument(OPS_HTML);
@@ -168,14 +235,10 @@ describe('error handling (RedraOpError)', () => {
   it('throws when beforeId belongs to a different parent', () => {
     const doc = parseDocument(OPS_HTML);
     // title lives in head, p#a lives in body
-    let titleId: string | undefined;
-    for (let i = 0; ; i++) {
-      const el = getElementById(doc, `r${i}`);
-      if (!el) break;
-      if (el.tagName === 'title') titleId = `r${i}`;
-    }
     expect(() =>
-      serializeSource(doc, [{ type: 'moveBlock', id: rid(doc, 'a'), beforeId: titleId! }]),
+      serializeSource(doc, [
+        { type: 'moveBlock', id: rid(doc, 'a'), beforeId: tagId(doc, 'title') },
+      ]),
     ).toThrowError(RedraOpError);
   });
 

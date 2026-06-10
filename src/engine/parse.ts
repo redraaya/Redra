@@ -5,7 +5,13 @@ function isElement(node: unknown): node is Element {
   return typeof node === 'object' && node !== null && 'tagName' in node;
 }
 
-function isTemplate(el: Element): el is Template {
+/**
+ * parse5 keeps a template's children in `el.content` (a DocumentFragment),
+ * not in `el.childNodes` — any code touching an element's subtree must check.
+ *
+ * @internal
+ */
+export function isTemplate(el: Element): el is Template {
   return el.tagName === 'template' && 'content' in el;
 }
 
