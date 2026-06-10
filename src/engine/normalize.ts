@@ -36,6 +36,51 @@ const DROPPED_TAGS = new Set([
 /** URL schemes allowed in <a href>. Anything else loses the attribute. */
 const SAFE_SCHEMES = new Set(['http', 'https', 'mailto', 'tel']);
 
+/**
+ * Block-level elements whose unwrapping contributes one <br> BEFORE their
+ * content when visible content already precedes them (break-before only —
+ * inline text right after a block continues its line, same as div always
+ * did). td/th are deliberately absent: cells unwrap inline, only <tr>
+ * breaks. <hr> has no children, so its unwrapping yields just the <br>.
+ */
+const LINE_BREAK_TAGS = new Set([
+  'div',
+  'p',
+  'li',
+  'tr',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'blockquote',
+  'pre',
+  'ul',
+  'ol',
+  'table',
+  'thead',
+  'tbody',
+  'tfoot',
+  'caption',
+  'dl',
+  'dt',
+  'dd',
+  'figure',
+  'figcaption',
+  'section',
+  'article',
+  'header',
+  'footer',
+  'aside',
+  'main',
+  'nav',
+  'hr',
+  'address',
+  'fieldset',
+  'form',
+]);
+
 function isElementNode(node: ChildNode): node is Element {
   return 'tagName' in node;
 }
@@ -54,6 +99,9 @@ function isBr(node: ChildNode): boolean {
  * fooled: tab/newline/CR are stripped everywhere, leading C0 controls and
  * spaces are stripped, the scheme match is case-insensitive. parse5 has
  * already decoded entities by the time the value gets here.
+ *
+ * Protocol-relative `//host` hrefs are kept on purpose: they are not
+ * executable, and Cmd+click opens them in an external browser anyway.
  */
 function isSafeHref(value: string): boolean {
   const cleaned = value.replace(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+/, '');
@@ -102,12 +150,19 @@ function collapseBrRuns(nodes: ChildNode[]): ChildNode[] {
  * - text stays as-is, comments vanish;
  * - DROPPED_TAGS vanish with their whole subtree;
  * - KEPT_TAGS keep only allowed attributes and recurse into children;
- * - everything else is unwrapped (children hoisted, recursed); a div/p with
- *   visible content already emitted contributes one <br> first, preserving
- *   the line break contenteditable expressed as a block;
+ * - everything else is unwrapped (children hoisted, recursed); a
+ *   LINE_BREAK_TAGS block with visible content already before it
+ *   contributes one <br> first, preserving the line break contenteditable
+ *   expressed as a block;
  * - finally <br> runs longer than two collapse to two.
+ *
+ * `precededByVisible` carries "visible content was already emitted before
+ * this sibling list" across recursion levels, so a block inside an
+ * unwrapped inline wrapper (`text<span><div>line</div></span>`) still gets
+ * its <br>. Children of a line-break block start a fresh line, so they
+ * recurse with `false`.
  */
-function normalizeSiblings(nodes: readonly ChildNode[]): ChildNode[] {
+function normalizeSiblings(nodes: readonly ChildNode[], precededByVisible: boolean): ChildNode[] {
   const out: ChildNode[] = [];
   for (const node of nodes) {
     if (node.nodeName === '#comment') continue;
@@ -118,16 +173,23 @@ function normalizeSiblings(nodes: readonly ChildNode[]): ChildNode[] {
     if (DROPPED_TAGS.has(node.tagName)) continue;
     if (KEPT_TAGS.has(node.tagName)) {
       node.attrs = filterAttrs(node);
-      node.childNodes = normalizeSiblings(node.childNodes);
+      node.childNodes = normalizeSiblings(
+        node.childNodes,
+        precededByVisible || hasVisibleContent(out),
+      );
       for (const child of node.childNodes) child.parentNode = node;
       out.push(node);
       continue;
     }
     // Unwrap: the element disappears, its (normalized) children remain.
-    if ((node.tagName === 'div' || node.tagName === 'p') && hasVisibleContent(out)) {
-      out.push(defaultTreeAdapter.createElement('br', html.NS.HTML, []));
+    if (LINE_BREAK_TAGS.has(node.tagName)) {
+      if (precededByVisible || hasVisibleContent(out)) {
+        out.push(defaultTreeAdapter.createElement('br', html.NS.HTML, []));
+      }
+      out.push(...normalizeSiblings(node.childNodes, false));
+    } else {
+      out.push(...normalizeSiblings(node.childNodes, precededByVisible || hasVisibleContent(out)));
     }
-    out.push(...normalizeSiblings(node.childNodes));
   }
   return collapseBrRuns(out);
 }
@@ -136,7 +198,8 @@ function normalizeSiblings(nodes: readonly ChildNode[]): ChildNode[] {
  * Normalize contenteditable-produced HTML before it is recorded as an
  * editText payload: keep only bare inline formatting (b, strong, i, em, u,
  * s, a, code, br, sub, sup, mark), strip all attributes except a safe href
- * on <a>, turn div/p line blocks into <br>, drop scripts/styles/comments
+ * on <a>, turn block elements (LINE_BREAK_TAGS) into <br>-separated lines,
+ * drop scripts/styles/comments
  * with their content, and leave text untouched (no whitespace collapsing).
  *
  * Pure parse5, no DOM — safe to call from the engine or a preload bundle.
@@ -144,7 +207,7 @@ function normalizeSiblings(nodes: readonly ChildNode[]): ChildNode[] {
  */
 export function normalizeEditedHtml(raw: string): string {
   const fragment = parseFragment(raw);
-  fragment.childNodes = normalizeSiblings(fragment.childNodes);
+  fragment.childNodes = normalizeSiblings(fragment.childNodes, false);
   for (const child of fragment.childNodes) child.parentNode = fragment;
   return serialize(fragment);
 }
