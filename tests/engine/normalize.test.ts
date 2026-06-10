@@ -115,6 +115,42 @@ describe('normalizeEditedHtml: block boundaries become <br>', () => {
   });
 });
 
+describe('normalizeEditedHtml: non-div/p blocks also become <br> lines', () => {
+  it('list items become lines: ul/li unwrap with a <br> between items', () => {
+    expect(normalizeEditedHtml(fx('<ul><li>one</li><li>two</li></ul>'))).toBe('one<br>two');
+  });
+
+  it('nested lists keep every item on its own line', () => {
+    expect(
+      normalizeEditedHtml(fx('<ul><li>one<ul><li>sub</li></ul></li><li>two</li></ul>')),
+    ).toBe('one<br>sub<br>two');
+  });
+
+  it('INTERPRETATION: only <tr> breaks a line — td/th unwrap inline, so cells of one row concatenate', () => {
+    expect(normalizeEditedHtml(fx('x<table><tr><td>a</td><td>b</td></tr></table>'))).toBe(
+      'x<br>ab',
+    );
+  });
+
+  it('a heading breaks the line BEFORE itself, and the following <p> breaks after', () => {
+    expect(normalizeEditedHtml(fx('intro<h1>Title</h1><p>para</p>'))).toBe(
+      'intro<br>Title<br>para',
+    );
+  });
+
+  it('INTERPRETATION: blocks break before themselves only — inline text right after a blockquote continues its line (same rule as div)', () => {
+    expect(normalizeEditedHtml(fx('a<blockquote>q</blockquote>b'))).toBe('a<br>qb');
+  });
+
+  it('<hr> is an empty line-break block: unwrapping it yields a bare <br>', () => {
+    expect(normalizeEditedHtml(fx('a<hr>b'))).toBe('a<br>b');
+  });
+
+  it('a block inside an unwrapped inline wrapper still sees the preceding text across levels', () => {
+    expect(normalizeEditedHtml(fx('text<span><div>line</div></span>'))).toBe('text<br>line');
+  });
+});
+
 describe('normalizeEditedHtml: links', () => {
   it('keeps https href, strips other attributes', () => {
     expect(
