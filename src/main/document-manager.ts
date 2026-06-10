@@ -22,6 +22,8 @@ export interface OpenedDoc {
   originalBytes: Buffer;
   /** Canonical encoding the file was decoded with. */
   encoding: string;
+  /** True when the source bytes started with a BOM (saved output never re-emits it). */
+  hadBom: boolean;
   /** Stamped HTML served at redra://doc/<docId>/. */
   stampedHtml: string;
   /** mtime at open / after our last successful save — for the conflict guard. */
@@ -58,7 +60,7 @@ export class DocumentManager {
     const stat = await fs.stat(filePath);
     const tRead = performance.now();
 
-    const { text, encoding } = decodeHtml(originalBytes);
+    const { text, encoding, hadBom } = decodeHtml(originalBytes);
     const tDecode = performance.now();
 
     const doc = parseDocument(text);
@@ -75,6 +77,7 @@ export class DocumentManager {
       journal: new Journal(),
       originalBytes,
       encoding,
+      hadBom,
       stampedHtml,
       lastKnownMtimeMs: stat.mtimeMs,
       backupDone: false,
@@ -100,7 +103,7 @@ export class DocumentManager {
 
   /**
    * Save pipeline. `asPath` set ⇒ Save As.
-   * - no ops + same path ⇒ no-op, report ok (engine guarantees verbatim bytes anyway)
+   * - no ops + clean journal + same path ⇒ no-op, report ok (disk already verbatim)
    * - mtime conflict guard before overwriting
    * - first overwrite-save of a session writes <name>.html.bak with original bytes
    * - atomic write: tmp file in the same dir + rename
@@ -114,8 +117,11 @@ export class DocumentManager {
     const overwritesCurrent = targetPath === cur.filePath;
     const ops = cur.journal.ops;
 
-    // Save (not Save As) with no ops onto the same file: bytes are identical — skip the write.
-    if (asPath === undefined && ops.length === 0) {
+    // Save (not Save As) with no ops onto the same file AND a clean journal:
+    // disk already holds originalBytes — skip the write. A dirty journal with
+    // no ops (edit → save → undo-all) means disk holds the EDITED bytes, so
+    // we must fall through and write originalBytes back.
+    if (asPath === undefined && ops.length === 0 && !cur.journal.dirty) {
       this.perf.record('save-skipped-noop', performance.now() - t0);
       return { ok: true, path: targetPath, skipped: true };
     }
@@ -137,12 +143,14 @@ export class DocumentManager {
       // With ops the serialized string is written as utf-8 (TextEncoder/Buffer
       // cannot produce legacy encodings). If the file was decoded from another
       // encoding, its <meta charset> would now lie — rewrite it to utf-8.
+      // Same for BOM files: the BOM (which won at decode, possibly over a
+      // lying meta) is not re-emitted, so the meta must tell the truth.
       let bytes: Buffer;
       if (ops.length === 0) {
         bytes = cur.originalBytes;
       } else {
         let html = serializeSource(cur.doc, ops);
-        if (cur.encoding !== 'utf-8') html = ensureUtf8Charset(html);
+        if (cur.encoding !== 'utf-8' || cur.hadBom) html = ensureUtf8Charset(html);
         bytes = Buffer.from(html, 'utf8');
       }
 

@@ -61,6 +61,21 @@ describe('detectEncoding / decodeHtml', () => {
     expect(res.text).toContain('ok');
   });
 
+  it('ignores accept-charset on a <form> (only <meta> tags count)', () => {
+    const noMeta = '<form accept-charset="koi8-r"><input></form>';
+    expect(sniffMetaCharset(Buffer.from(noMeta, 'latin1'))).toBeNull();
+    expect(decodeHtml(Buffer.from(noMeta, 'latin1')).encoding).toBe('utf-8');
+
+    const withMeta = noMeta + '<meta charset="windows-1251">';
+    expect(sniffMetaCharset(Buffer.from(withMeta, 'latin1'))).toBe('windows-1251');
+  });
+
+  it('ignores a charset mention inside a comment', () => {
+    const html = '<!-- generator: legacy-cms, charset=koi8-r --><p>ok</p>';
+    expect(sniffMetaCharset(Buffer.from(html, 'latin1'))).toBeNull();
+    expect(decodeHtml(Buffer.from(html, 'latin1')).encoding).toBe('utf-8');
+  });
+
   it('only sniffs the first 1024 bytes', () => {
     const padding = '<!-- ' + 'x'.repeat(1100) + ' -->';
     const buf = Buffer.from(padding + '<meta charset="windows-1251">', 'latin1');

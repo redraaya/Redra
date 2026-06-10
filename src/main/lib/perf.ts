@@ -4,13 +4,9 @@
  * save < 100 ms) are only measured and logged at this stage.
  */
 
-export interface PerfEntry {
-  name: string;
-  ms: number;
-  /** Date.now() of when the entry was recorded. */
-  at: number;
-  detail?: Record<string, number>;
-}
+import type { PerfEntry } from '../../shared/ipc.js';
+
+export type { PerfEntry };
 
 export class PerfLog {
   private entries: PerfEntry[] = [];
