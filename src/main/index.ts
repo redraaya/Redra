@@ -1,12 +1,17 @@
-import { app, BrowserWindow, WebContentsView, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, shell } from 'electron';
+import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerRedraScheme, installRedraProtocolHandler } from './protocol.js';
 import { DocumentManager } from './document-manager.js';
 import { RecentsStore } from './recents-store.js';
 import { buildAppMenu } from './menu.js';
+import { EDITOR_CSS } from './editor-css.js';
 import { PerfLog } from './lib/perf.js';
-import type { OpenResult, SaveResult } from '../shared/ipc.js';
+import { senderMatches } from './lib/sender.js';
+import { validateOp } from './lib/validate-op.js';
+import type { OpPushResult, OpUndoResult, OpenResult, SaveResult } from '../shared/ipc.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +35,8 @@ let recents: RecentsStore;
 let win: BrowserWindow | null = null;
 let docView: WebContentsView | null = null;
 let pendingOpenPath: string | null = cliFile ? path.resolve(cliFile) : null;
+/** «Просмотр» state — single source of truth lives here in main. */
+let previewOn = false;
 
 // macOS: dock / Finder "open with"
 app.on('open-file', (event, filePath) => {
@@ -60,6 +67,9 @@ async function onReady(): Promise<void> {
     open: () => void openViaDialog(),
     save: () => void doSave(false),
     saveAs: () => void doSave(true),
+    undo: () => docView?.webContents.send('edit:undo'),
+    redo: () => docView?.webContents.send('edit:redo'),
+    togglePreview: (checked) => setPreview(checked),
   });
   registerIpc();
   createWindow(readyAt);
@@ -158,6 +168,17 @@ function ensureDocView(): WebContentsView {
   layoutDocView();
 
   const wc = view.webContents;
+
+  // Editor visuals (hover wash, editing hairline, drag cursor). insertCSS
+  // bypasses the page's CSP; dom-ready fires per navigation, so every loaded
+  // document gets the sheet. Inserted before first paint of page content in
+  // practice — and the classes it styles only appear on user interaction.
+  wc.on('dom-ready', () => {
+    void wc.insertCSS(EDITOR_CSS).catch((err: unknown) => {
+      console.error('[editor] insertCSS failed:', err);
+    });
+  });
+
   // Navigation policy: http(s) → external browser; same-doc redra:// root
   // allowed; dropped .html files open in Redra; everything else denied.
   wc.on('will-navigate', (event, url) => {
@@ -214,6 +235,73 @@ function layoutDocView(): void {
   });
 }
 
+// --- editing mode + edit-session commit -------------------------------------
+
+/** Toggle «Просмотр»: editing layer off in the doc view, pill in the shell. */
+function setPreview(on: boolean): void {
+  // Switching INTO preview must not lose an in-flight edit session.
+  const finish = (): void => {
+    previewOn = on;
+    const item = Menu.getApplicationMenu()?.getMenuItemById('view-preview');
+    if (item) item.checked = on;
+    docView?.webContents.send('mode:set', { editing: !on });
+    win?.webContents.send('mode:changed', { editing: !on });
+  };
+  if (on && !previewOn) void commitActiveEdit().then(finish);
+  else finish();
+}
+
+/**
+ * Ask the doc preload to commit any active edit session and wait for the
+ * ack (nonce on 'edit:committed'), at most 300ms — if the view is gone or
+ * unresponsive we proceed anyway rather than wedging the save flow.
+ */
+function commitActiveEdit(): Promise<void> {
+  const wc = docView?.webContents;
+  if (!wc || wc.isDestroyed()) return Promise.resolve();
+  const nonce = randomUUID();
+  return new Promise<void>((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      ipcMain.removeListener('edit:committed', onReply);
+      resolve();
+    };
+    const onReply = (event: IpcMainEvent, replyNonce: unknown): void => {
+      if (!senderMatches(event, wc) || replyNonce !== nonce) return;
+      done();
+    };
+    const timer = setTimeout(done, 300);
+    ipcMain.on('edit:committed', onReply);
+    wc.send('edit:commit', nonce);
+  });
+}
+
+function broadcastDirty(): void {
+  const cur = docManager.currentDoc;
+  win?.webContents.send('doc:dirtyChanged', { dirty: cur ? cur.journal.dirty : false });
+}
+
+/** SMOKE-mode self-check: validation + journal round-trip on the real doc. */
+function smokeOpsRoundtrip(): void {
+  const cur = docManager.currentDoc;
+  if (!cur) return;
+  const checked = validateOp({ type: 'editText', id: 'r1', html: '<b>smoke</b>' }, cur.doc);
+  if (!checked.ok) {
+    console.error('[smoke] ops-roundtrip FAILED: validateOp:', checked.error);
+    app.exit(1);
+    return;
+  }
+  cur.journal.push(checked.op);
+  const dirtyAfterPush = cur.journal.dirty;
+  cur.journal.undo();
+  if (!dirtyAfterPush || cur.journal.dirty) {
+    console.error('[smoke] ops-roundtrip FAILED: dirty flags wrong');
+    app.exit(1);
+    return;
+  }
+  console.log('[smoke] ops-roundtrip OK');
+}
+
 // --- open / save flows -----------------------------------------------------
 
 async function openDocument(filePath: string): Promise<OpenResult> {
@@ -232,8 +320,9 @@ async function openDocument(filePath: string): Promise<OpenResult> {
     const name = path.basename(opened.filePath);
     win?.setTitle(`${name} — Redra`);
     win?.webContents.send('doc:opened', { path: opened.filePath, name });
-    // No ops exist until Stage 3, so the doc is always clean — but the wiring matters.
-    win?.webContents.send('doc:dirtyChanged', { dirty: false });
+    win?.webContents.send('doc:dirtyChanged', { dirty: opened.journal.dirty });
+    // A fresh document always starts in live editing, never in «Просмотр».
+    setPreview(false);
 
     app.addRecentDocument(opened.filePath);
     await recents.add(opened.filePath);
@@ -243,6 +332,7 @@ async function openDocument(filePath: string): Promise<OpenResult> {
       for (const e of perf.all()) {
         console.log(`[smoke] perf ${e.name} = ${e.ms}ms`, e.detail ?? '');
       }
+      smokeOpsRoundtrip();
       setTimeout(() => app.exit(0), 250);
     }
     return { ok: true, path: opened.filePath, name };
@@ -270,6 +360,9 @@ async function doSave(saveAs: boolean): Promise<SaveResult> {
   const cur = docManager.currentDoc;
   if (!cur) return { ok: false, error: 'Документ не открыт' };
 
+  // An active edit session must land in the journal before serialization.
+  await commitActiveEdit();
+
   let asPath: string | undefined;
   if (saveAs) {
     if (!win) return { ok: false, error: 'no window' };
@@ -295,16 +388,80 @@ async function doSave(saveAs: boolean): Promise<SaveResult> {
 
 // --- IPC -------------------------------------------------------------------
 
+/** True when the invoke came from the shell window's renderer. */
+function fromShell(event: IpcMainInvokeEvent): boolean {
+  return senderMatches(event, win?.webContents);
+}
+
+/** True when the invoke came from the document view's renderer. */
+function fromDoc(event: IpcMainInvokeEvent): boolean {
+  return senderMatches(event, docView?.webContents);
+}
+
 function registerIpc(): void {
-  ipcMain.handle('dialog:openFile', () => openViaDialog());
-  ipcMain.handle('doc:open', (_event, filePath: unknown) => {
+  // --- shell channels ---
+  ipcMain.handle('dialog:openFile', (event) => {
+    if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies OpenResult;
+    return openViaDialog();
+  });
+  ipcMain.handle('doc:open', (event, filePath: unknown) => {
+    if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies OpenResult;
     if (typeof filePath !== 'string' || filePath.length === 0) {
       return { ok: false, error: 'bad path' } satisfies OpenResult;
     }
     return openDocument(filePath);
   });
-  ipcMain.handle('doc:save', () => doSave(false));
-  ipcMain.handle('doc:saveAs', () => doSave(true));
-  ipcMain.handle('recents:get', () => recents.get());
-  ipcMain.handle('perf:get', () => perf.all());
+  ipcMain.handle('doc:save', (event) => {
+    if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies SaveResult;
+    return doSave(false);
+  });
+  ipcMain.handle('doc:saveAs', (event) => {
+    if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies SaveResult;
+    return doSave(true);
+  });
+  ipcMain.handle('recents:get', (event) => (fromShell(event) ? recents.get() : []));
+  ipcMain.handle('perf:get', (event) => (fromShell(event) ? perf.all() : []));
+
+  // --- doc-view channels (Stage 3 editing bridge) ---
+  ipcMain.handle('ops:push', (event, raw: unknown): OpPushResult => {
+    if (!fromDoc(event)) return { ok: false, error: 'bad sender' };
+    const cur = docManager.currentDoc;
+    if (!cur) return { ok: false, error: 'no document' };
+    const checked = validateOp(raw, cur.doc);
+    if (!checked.ok) {
+      console.error('[ops] rejected push:', checked.error);
+      return { ok: false, error: checked.error };
+    }
+    cur.journal.push(checked.op);
+    broadcastDirty();
+    return { ok: true };
+  });
+  ipcMain.handle('ops:undo', (event): OpUndoResult => {
+    if (!fromDoc(event)) return { ok: false, dirty: false };
+    const cur = docManager.currentDoc;
+    if (!cur) return { ok: false, dirty: false };
+    const ok = cur.journal.undo();
+    broadcastDirty();
+    return { ok, dirty: cur.journal.dirty };
+  });
+  ipcMain.handle('ops:redo', (event): OpUndoResult => {
+    if (!fromDoc(event)) return { ok: false, dirty: false };
+    const cur = docManager.currentDoc;
+    if (!cur) return { ok: false, dirty: false };
+    const ok = cur.journal.redo();
+    broadcastDirty();
+    return { ok, dirty: cur.journal.dirty };
+  });
+  ipcMain.handle('link:openExternal', (event, url: unknown) => {
+    if (!fromDoc(event)) return;
+    if (typeof url !== 'string') return;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+    void shell.openExternal(url);
+  });
 }
