@@ -15,7 +15,14 @@
  *   'doc:dirtyChanged'  DirtyState   — always { dirty: false } until Stage 3
  */
 
-import type { PerfEntry } from '../main/lib/perf';
+/** One recorded perf measurement (see PerfLog in main/lib/perf). */
+export interface PerfEntry {
+  name: string;
+  ms: number;
+  /** Date.now() of when the entry was recorded. */
+  at: number;
+  detail?: Record<string, number>;
+}
 
 export type OpenResult =
   | { ok: true; path: string; name: string }
@@ -47,5 +54,3 @@ export interface RedraShellApi {
   onDocOpened(cb: (info: DocOpenedInfo) => void): void;
   onDirtyChanged(cb: (state: DirtyState) => void): void;
 }
-
-export type { PerfEntry };

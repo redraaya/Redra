@@ -65,13 +65,16 @@ async function onReady(): Promise<void> {
   createWindow(readyAt);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(performance.now());
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow(performance.now());
+      // open-file may have queued a path while no window existed.
+      void drainPendingOpen();
+    }
   });
 
-  if (pendingOpenPath) {
-    const p = pendingOpenPath;
-    pendingOpenPath = null;
-    await openDocument(p);
+  const pending = drainPendingOpen();
+  if (pending) {
+    await pending;
   } else if (SMOKE) {
     console.error('[smoke] no input file given');
     app.exit(1);
@@ -84,6 +87,14 @@ async function onReady(): Promise<void> {
       app.exit(1);
     }, 20_000);
   }
+}
+
+/** Open the path queued by 'open-file' while no window existed, if any. */
+function drainPendingOpen(): Promise<OpenResult> | null {
+  if (!pendingOpenPath) return null;
+  const p = pendingOpenPath;
+  pendingOpenPath = null;
+  return openDocument(p);
 }
 
 // --- window + document view ----------------------------------------------
@@ -165,12 +176,20 @@ function ensureDocView(): WebContentsView {
       const cur = docManager.currentDoc;
       const sameDocRoot = cur && parsed.hostname === 'doc' && parsed.pathname === `/${cur.docId}/`;
       if (sameDocRoot) return; // allow (e.g. anchors that re-request the root)
+      // Relative links to sibling .html docs are deliberately dead until multi-doc support.
       event.preventDefault();
       return;
     }
     if (parsed && parsed.protocol === 'file:') {
       event.preventDefault();
-      const fsPath = fileURLToPath(url);
+      // fileURLToPath throws on e.g. file://host/x.html — document content is
+      // untrusted, so never let a crafted anchor crash the main process.
+      let fsPath: string;
+      try {
+        fsPath = fileURLToPath(url);
+      } catch {
+        return; // navigation already prevented
+      }
       if (/\.html?$/i.test(fsPath)) void openDocument(fsPath); // file dropped onto the doc view
       return;
     }

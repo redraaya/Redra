@@ -26,7 +26,11 @@ export function sniffMetaCharset(bytes: Uint8Array): string | null {
   // Latin-1 view is enough: charset names are ASCII.
   let ascii = '';
   for (let i = 0; i < head.length; i++) ascii += String.fromCharCode(head[i]!);
-  const m = /charset\s*=\s*["']?\s*([A-Za-z0-9][A-Za-z0-9._:-]*)/i.exec(ascii);
+  // Anchor to a <meta ...> tag so accept-charset on forms, comments and
+  // inline script text within the sniff window are not mistaken for a
+  // declaration. Covers both <meta charset=...> and the http-equiv form
+  // (charset=... inside the content attribute).
+  const m = /<meta[^>]*charset\s*=\s*["']?\s*([A-Za-z0-9][A-Za-z0-9._:-]*)/i.exec(ascii);
   return m ? m[1]!.toLowerCase() : null;
 }
 
