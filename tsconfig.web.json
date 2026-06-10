@@ -3,12 +3,13 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": []
   },
-  "include": ["src/engine/**/*", "src/main/lib/**/*", "tests/**/*"]
+  "include": ["src/renderer/**/*", "src/shared/**/*", "src/main/lib/perf.ts"]
 }

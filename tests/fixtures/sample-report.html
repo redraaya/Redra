@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Квартальный отчёт</title>
+<style>
+  body { font-family: Georgia, serif; margin: 2rem auto; max-width: 40rem; color: #222; }
+  h1 { border-bottom: 2px solid #b35; }
+  figure { margin: 1rem 0; }
+  .generated { color: #777; font-style: italic; }
+</style>
+</head>
+<body>
+<h1>Квартальный отчёт</h1>
+<p>Выручка выросла на <strong>12%</strong> по сравнению с прошлым кварталом.</p>
+<figure>
+  <img src="img/chart.png" alt="График выручки" width="64" height="64">
+  <figcaption>Рис. 1. Динамика выручки</figcaption>
+</figure>
+<p>Подробности — на <a href="https://example.com/methodology">странице методологии</a>.</p>
+<div id="summary"></div>
+<script>
+  // The page's own script must run freely in the document view.
+  var el = document.createElement('p');
+  el.className = 'generated';
+  el.textContent = 'Сгенерировано скриптом страницы: ' + new Date().getFullYear();
+  document.getElementById('summary').appendChild(el);
+  document.title = document.title + ' • готово';
+</script>
+</body>
+</html>
