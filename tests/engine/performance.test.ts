@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { parseDocument, serializeForView } from '../../src/engine/index.js';
+import {
+  getElementById,
+  parseDocument,
+  serializeForView,
+  serializeSource,
+  type Op,
+} from '../../src/engine/index.js';
 import { serializePristine } from '../../src/engine/serialize.js';
 
 function generateBigReport(targetBytes: number): string {
@@ -48,5 +54,41 @@ describe('performance smoke', () => {
     expect(view).toContain('data-redra-id');
     expect(src).not.toContain('data-redra-id');
     expect(totalMs).toBeLessThan(1000);
+  });
+
+  it('serializeSource with 200 mixed ops on a ~1 MB doc under 500 ms', () => {
+    const html = generateBigReport(1_000_000);
+    const doc = parseDocument(html);
+
+    // collect ids of <section> elements (one per block, plenty of them)
+    const sectionIds: string[] = [];
+    for (let i = 0; ; i++) {
+      const el = getElementById(doc, `r${i}`);
+      if (!el) break;
+      if (el.tagName === 'section') sectionIds.push(`r${i}`);
+    }
+    expect(sectionIds.length).toBeGreaterThan(600);
+
+    // 200 mixed ops, each on its own section — no conflicts
+    const ops: Op[] = [];
+    for (let k = 0; k < 200; k++) {
+      const id = sectionIds[k]!;
+      if (k % 3 === 0) {
+        ops.push({ type: 'editText', id, html: `<h2>Edited ${k}</h2><p>new <b>content</b></p>` });
+      } else if (k % 3 === 1) {
+        ops.push({ type: 'moveBlock', id, beforeId: null });
+      } else {
+        ops.push({ type: 'deleteBlock', id });
+      }
+    }
+
+    const t0 = performance.now();
+    const out = serializeSource(doc, ops);
+    const elapsed = performance.now() - t0;
+    console.log(`perf ops: serializeSource(~1 MB, 200 ops)=${elapsed.toFixed(1)}ms`);
+
+    expect(out).toContain('Edited 0');
+    expect(out).not.toContain('data-redra-id');
+    expect(elapsed).toBeLessThan(500);
   });
 });

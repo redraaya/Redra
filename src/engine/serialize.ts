@@ -1,4 +1,6 @@
 import { serialize } from 'parse5';
+import { applyOps, type Op } from './ops.js';
+import { parseDocument } from './parse.js';
 import { REDRA_ID_ATTR, type RedraDoc } from './types.js';
 
 /**
@@ -6,9 +8,19 @@ import { REDRA_ID_ATTR, type RedraDoc } from './types.js';
  *
  * With no ops the ORIGINAL source string is returned byte-for-byte: opening
  * and saving an unedited file must not rewrite it (no phantom diffs).
+ *
+ * With ops: the pristine source is re-parsed into a clone (parseDocument
+ * assigns ids with the same walk, so the clone's ids match the original's),
+ * the ops are applied in order to the clone, and the clone is serialized.
+ * The pristine tree and id maps of `doc` are never touched.
+ *
+ * @throws RedraOpError when an op references a missing/removed element.
  */
-export function serializeSource(doc: RedraDoc): string {
-  return doc.source;
+export function serializeSource(doc: RedraDoc, ops: readonly Op[] = []): string {
+  if (ops.length === 0) return doc.source;
+  const clone = parseDocument(doc.source);
+  applyOps(clone, ops);
+  return serialize(clone.document);
 }
 
 /**
