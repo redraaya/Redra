@@ -7,13 +7,13 @@
 <style>
   :root{
     --paper:#F7F6F3; --surface:#FFFFFF; --ink:#1C1B19; --muted:#8A877F;
-    --line:rgba(28,27,25,.09); --accent:#D9482B; --accent-soft:rgba(217,72,43,.38);
-    --hover:rgba(28,27,25,.04);
+    --line:rgba(28,27,25,.09); --accent:#D9482B; --sel:rgba(28,27,25,.13);
+    --hover:rgba(28,27,25,.04); --wash:rgba(28,27,25,.035);
   }
   .dark{
     --paper:#1B1A18; --surface:#232220; --ink:#ECEAE6; --muted:#8F8C84;
-    --line:rgba(236,234,230,.12); --accent:#FF6B4A; --accent-soft:rgba(255,107,74,.45);
-    --hover:rgba(236,234,230,.05);
+    --line:rgba(236,234,230,.12); --accent:#FF6B4A; --sel:rgba(236,234,230,.18);
+    --hover:rgba(236,234,230,.05); --wash:rgba(236,234,230,.045);
   }
   *{box-sizing:border-box; margin:0}
   body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,sans-serif; background:#ECEAE4; padding:48px; display:flex; flex-direction:column; gap:48px; align-items:center}
@@ -53,18 +53,18 @@
   .stat{flex:1; background:#F2F6FB; border-radius:8px; padding:14px 16px}
   .stat .v{font-size:21px; font-weight:700; color:#16335B}
   .stat .l{font-size:11.5px; color:#7C8696; margin-top:2px}
-  .blk-hover{outline:1.5px solid var(--accent-soft); border-radius:9px}
+  .blk-hover{background:var(--wash); outline:1px solid var(--sel); border-radius:9px}
   .handle{position:absolute; left:-46px; top:50%; transform:translateY(-50%); width:30px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:6px 0; display:flex; flex-direction:column; align-items:center; gap:6px; box-shadow:0 3px 10px rgba(20,18,14,.12); color:var(--muted)}
   .handle i{font-size:15px}
   .handle .grip{cursor:grab; letter-spacing:-1px; font-size:13px; line-height:.6; text-align:center}
-  .editing{outline:2px solid var(--accent-soft); outline-offset:3px; border-radius:3px}
+  .editing{outline:1px solid var(--sel); outline-offset:5px; border-radius:2px}
   .caret{display:inline-block; width:1.5px; height:1.05em; background:var(--accent); vertical-align:-2px; animation:blink 1.1s steps(1) infinite}
   @keyframes blink{50%{opacity:0}}
   .page table{width:100%; border-collapse:collapse; margin-top:20px; font-size:13px}
   .page th{text-align:left; color:#7C8696; font-weight:600; border-bottom:1.5px solid #E4E9F0; padding:7px 4px}
   .page td{border-bottom:1px solid #EEF1F5; padding:7px 4px}
 
-  .note{position:absolute; font-size:11.5px; color:var(--accent); white-space:nowrap}
+  .note{position:absolute; font-size:11.5px; color:var(--muted); white-space:nowrap}
 
   .icons{display:flex; gap:40px}
   .icon-card{display:flex; flex-direction:column; align-items:center; gap:12px; font-size:13px; color:#3A3833}
