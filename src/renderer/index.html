@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>Redra</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header id="strip"><span id="strip-title">Redra</span></header>
+    <main id="placeholder">
+      <h1>Redra</h1>
+      <button id="open-btn" type="button">Открыть файл…</button>
+      <p class="hint">…или перетащите HTML-файл в это окно</p>
+      <ul id="recents"></ul>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
