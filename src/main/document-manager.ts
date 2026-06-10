@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { Journal, parseDocument, serializeForView, serializeSource } from '../engine/index.js';
 import type { RedraDoc } from '../engine/index.js';
+import { ensureUtf8Charset } from './lib/charset-rewrite.js';
 import { decodeHtml } from './lib/encoding.js';
 import type { PerfLog } from './lib/perf.js';
 import type { SaveResult } from '../shared/ipc.js';
@@ -133,10 +134,17 @@ export class DocumentManager {
         cur.backupDone = true;
       }
 
-      const bytes =
-        ops.length === 0
-          ? cur.originalBytes
-          : Buffer.from(serializeSource(cur.doc, ops), 'utf8');
+      // With ops the serialized string is written as utf-8 (TextEncoder/Buffer
+      // cannot produce legacy encodings). If the file was decoded from another
+      // encoding, its <meta charset> would now lie — rewrite it to utf-8.
+      let bytes: Buffer;
+      if (ops.length === 0) {
+        bytes = cur.originalBytes;
+      } else {
+        let html = serializeSource(cur.doc, ops);
+        if (cur.encoding !== 'utf-8') html = ensureUtf8Charset(html);
+        bytes = Buffer.from(html, 'utf8');
+      }
 
       await atomicWrite(targetPath, bytes);
 
