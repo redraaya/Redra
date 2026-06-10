@@ -1,6 +1,6 @@
 import { parseFragment } from 'parse5';
-import { walkElements } from './parse.js';
-import type { Element, RedraDoc } from './types.js';
+import { isTemplate, walkElements } from './parse.js';
+import { REDRA_ID_ATTR, type Element, type ParentNode, type RedraDoc } from './types.js';
 
 /** Replace ALL children of element `id` with the given HTML fragment. */
 export type EditTextOp = { type: 'editText'; id: string; html: string };
@@ -21,7 +21,7 @@ export class RedraOpError extends Error {
   readonly reason: string;
 
   constructor(op: Op, reason: string) {
-    super(`${op.type} "${op.id}": ${reason}`);
+    super(`${op.type}: ${reason}`);
     this.name = 'RedraOpError';
     this.op = op;
     this.reason = reason;
@@ -42,6 +42,22 @@ export function applyOps(doc: RedraDoc, ops: readonly Op[]): void {
   // error: their ids no longer correspond to anything in the output.
   const removed = new Set<Element>();
 
+  // Mark every descendant of `el` as removed. For a <template> the children
+  // live in el.content, which walkElements only descends into for CHILD
+  // templates — the root's content must be walked explicitly.
+  const markSubtreeRemoved = (el: Element): void => {
+    if (isTemplate(el)) walkElements(el.content, (d) => removed.add(d));
+    walkElements(el, (d) => removed.add(d));
+  };
+
+  // The save output must never contain data-redra-id: Stage 3 captures
+  // editText html from the STAMPED live DOM, so fragments may carry stamps.
+  const stripRedraIds = (root: ParentNode): void => {
+    walkElements(root, (el) => {
+      el.attrs = el.attrs.filter((a) => a.name !== REDRA_ID_ATTR);
+    });
+  };
+
   const resolve = (op: Op, id: string, role: string): Element => {
     const el = doc.idToNode.get(id);
     if (!el) {
@@ -57,12 +73,16 @@ export function applyOps(doc: RedraDoc, ops: readonly Op[]): void {
     switch (op.type) {
       case 'editText': {
         const el = resolve(op, op.id, 'element');
-        walkElements(el, (d) => removed.add(d)); // old children are gone
+        markSubtreeRemoved(el); // old children are gone
         const fragment = parseFragment(el, op.html, {});
-        el.childNodes = [];
+        stripRedraIds(fragment);
+        // For a <template> the children live in el.content, and the
+        // serializer reads them from there.
+        const container: ParentNode = isTemplate(el) ? el.content : el;
+        container.childNodes = [];
         for (const child of fragment.childNodes) {
-          child.parentNode = el;
-          el.childNodes.push(child);
+          child.parentNode = container;
+          container.childNodes.push(child);
         }
         break;
       }
@@ -75,7 +95,7 @@ export function applyOps(doc: RedraDoc, ops: readonly Op[]): void {
         parent.childNodes.splice(parent.childNodes.indexOf(el), 1);
         el.parentNode = null;
         removed.add(el);
-        walkElements(el, (d) => removed.add(d));
+        markSubtreeRemoved(el);
         break;
       }
       case 'moveBlock': {

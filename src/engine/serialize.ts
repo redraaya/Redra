@@ -4,7 +4,9 @@ import { parseDocument } from './parse.js';
 import { REDRA_ID_ATTR, type RedraDoc } from './types.js';
 
 /**
- * Serialize the document for saving — no data-redra-id anywhere.
+ * Serialize the document for saving — no data-redra-id anywhere: the pristine
+ * tree is never stamped, and applyOps strips the attribute from editText
+ * fragments (which may come from the stamped live DOM).
  *
  * With no ops the ORIGINAL source string is returned byte-for-byte: opening
  * and saving an unedited file must not rewrite it (no phantom diffs).
