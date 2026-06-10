@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { parseDocument, serializeForView, serializeSource } from '../../src/engine/index.js';
+import { serializePristine } from '../../src/engine/serialize.js';
 
 describe('robustness on malformed / minimal input', () => {
   it('handles malformed HTML (unclosed tags, stray close tags) without throwing', () => {
     const html = '<div><p>unclosed<span>nested</div></p>stray</div><b>tail';
     const doc = parseDocument(html);
-    const src = serializeSource(doc);
+    const src = serializePristine(doc);
     const view = serializeForView(doc);
     expect(src).toContain('unclosed');
     expect(src).toContain('tail');
@@ -14,18 +15,19 @@ describe('robustness on malformed / minimal input', () => {
 
   it('handles the empty string', () => {
     const doc = parseDocument('');
-    const src = serializeSource(doc);
-    // parse5 synthesizes the html/head/body scaffold
-    expect(src).toContain('<html>');
+    // unedited save keeps the original (empty) bytes...
+    expect(serializeSource(doc)).toBe('');
+    // ...while the parsed tree has the synthesized html/head/body scaffold
+    expect(serializePristine(doc)).toContain('<html>');
     expect(serializeForView(doc)).toContain('data-redra-id="r0"');
   });
 
   it('handles a fragment without doctype/head and stays idempotent', () => {
     const fragment = '<h1>Hello</h1><p>World &amp; co</p>';
-    const s1 = serializeSource(parseDocument(fragment));
+    const s1 = serializePristine(parseDocument(fragment));
     expect(s1).toContain('<h1>Hello</h1>');
     expect(s1).toContain('World &amp; co');
-    expect(serializeSource(parseDocument(s1))).toBe(s1);
+    expect(serializePristine(parseDocument(s1))).toBe(s1);
   });
 
   it('handles whitespace-only and comment-only input', () => {

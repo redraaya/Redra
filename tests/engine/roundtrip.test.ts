@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseDocument, serializeSource } from '../../src/engine/index.js';
+import { serializePristine } from '../../src/engine/serialize.js';
 import {
   COMMENT_TEXT,
   PRE_TEXT,
@@ -8,8 +9,23 @@ import {
   STYLE_TEXT,
 } from './fixtures.js';
 
-describe('round-trip fidelity (serializeSource ∘ parseDocument)', () => {
-  const s1 = serializeSource(parseDocument(REPORT_HTML));
+describe('serializeSource without ops — verbatim source retention', () => {
+  it('returns the original source byte-for-byte', () => {
+    expect(serializeSource(parseDocument(REPORT_HTML))).toBe(REPORT_HTML);
+  });
+
+  it('does not normalize odd quoting, casing or whitespace', () => {
+    const odd =
+      '<!doctype HTML>\n<HTML lang=en>\n<head><TITLE>odd</TITLE></head>\n<body>\n' +
+      "<P CLASS=unquoted   data-x='single quoted'  >text  with   spaces</p>\n\n" +
+      '<div >trailing space inside tag</div >\n<img src=x.png alt=plain>\n' +
+      '</body>\n</html>   \n';
+    expect(serializeSource(parseDocument(odd))).toBe(odd);
+  });
+});
+
+describe('round-trip fidelity of the normalization path (serializePristine ∘ parseDocument)', () => {
+  const s1 = serializePristine(parseDocument(REPORT_HTML));
 
   it('preserves the doctype', () => {
     expect(s1.toLowerCase().startsWith('<!doctype html>')).toBe(true);
@@ -77,8 +93,8 @@ describe('round-trip fidelity (serializeSource ∘ parseDocument)', () => {
     expect(b).toEqual(a);
   });
 
-  it('is idempotent: serializeSource(parseDocument(s1)) === s1', () => {
-    const s2 = serializeSource(parseDocument(s1));
+  it('is idempotent: serializePristine(parseDocument(s1)) === s1', () => {
+    const s2 = serializePristine(parseDocument(s1));
     expect(s2).toBe(s1);
   });
 });

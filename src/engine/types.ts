@@ -13,6 +13,8 @@ export type Template = DefaultTreeAdapterMap['template'];
  * getElementById to interact with it.
  */
 export interface RedraDoc {
+  /** @internal the original source string, byte-for-byte as it was parsed */
+  readonly source: string;
   /** @internal pristine parse5 tree; never mutated by the public API */
   readonly document: Document;
   /** @internal "rN" -> element, in document order */
