@@ -18,18 +18,14 @@ describe('id <-> node lookup', () => {
 
   it('ids are assigned densely from r0 in document order', () => {
     const doc = parseDocument(REPORT_HTML);
-    const html = getElementById(doc, 'r0') as { tagName?: string };
-    expect(html?.tagName).toBe('html');
-    const head = getElementById(doc, 'r1') as { tagName?: string };
-    expect(head?.tagName).toBe('head');
+    expect(getElementById(doc, 'r0')?.tagName).toBe('html');
+    expect(getElementById(doc, 'r1')?.tagName).toBe('head');
   });
 
-  it('returns undefined for unknown ids and foreign nodes', () => {
+  it('returns undefined for unknown ids', () => {
     const doc = parseDocument(REPORT_HTML);
     expect(getElementById(doc, 'r999999')).toBeUndefined();
     expect(getElementById(doc, 'nonsense')).toBeUndefined();
-    expect(getElementId(doc, { tagName: 'div' })).toBeUndefined();
-    expect(getElementId(doc, null)).toBeUndefined();
   });
 
   it('nodes from a different doc of the same source do not collide', () => {
@@ -38,6 +34,6 @@ describe('id <-> node lookup', () => {
     const node1 = getElementById(doc1, 'r5');
     expect(node1).toBeDefined();
     // same id exists in doc2, but doc1's node is not a member of doc2's maps
-    expect(getElementId(doc2, node1)).toBeUndefined();
+    expect(getElementId(doc2, node1!)).toBeUndefined();
   });
 });

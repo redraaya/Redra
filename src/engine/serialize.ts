@@ -1,8 +1,24 @@
 import { serialize } from 'parse5';
 import { REDRA_ID_ATTR, type RedraDoc } from './types.js';
 
-/** Serialize the pristine tree unchanged — no data-redra-id anywhere. */
+/**
+ * Serialize the document for saving — no data-redra-id anywhere.
+ *
+ * With no ops the ORIGINAL source string is returned byte-for-byte: opening
+ * and saving an unedited file must not rewrite it (no phantom diffs).
+ */
 export function serializeSource(doc: RedraDoc): string {
+  return doc.source;
+}
+
+/**
+ * parse5 serialization of the pristine tree (normalized form, no stamps).
+ * This is what edited output goes through; kept separate so the fidelity of
+ * the normalization path stays testable.
+ *
+ * @internal
+ */
+export function serializePristine(doc: RedraDoc): string {
   return serialize(doc.document);
 }
 

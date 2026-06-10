@@ -53,6 +53,25 @@ describe('serializeForView stamping', () => {
     expect(serializeForView(doc)).toBe(serializeForView(doc));
   });
 
+  it('stamps elements inside a template nested in another template, with stable ids', () => {
+    const html =
+      '<!DOCTYPE html><html><head></head><body>' +
+      '<template id="outer"><div class="o">x<template id="inner">' +
+      '<span class="i">y</span></template></div></template>' +
+      '</body></html>';
+    const v1 = serializeForView(parseDocument(html));
+    const v2 = serializeForView(parseDocument(html));
+    // elements at every template nesting level are stamped
+    expect(v1).toMatch(/<template id="outer" data-redra-id="r\d+">/);
+    expect(v1).toMatch(/<div class="o" data-redra-id="r\d+">/);
+    expect(v1).toMatch(/<template id="inner" data-redra-id="r\d+">/);
+    expect(v1).toMatch(/<span class="i" data-redra-id="r\d+">y<\/span>/);
+    // ids are unique and the assignment is stable across parses
+    const ids = extractIds(v1);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(v2).toBe(v1);
+  });
+
   it('preserves a pre-existing data-redra-id attribute in the source', () => {
     const html = '<!DOCTYPE html><html><head></head><body><div data-redra-id="legacy">x</div></body></html>';
     const doc = parseDocument(html);

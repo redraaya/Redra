@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseDocument, serializeForView, serializeSource } from '../../src/engine/index.js';
+import { parseDocument, serializeForView } from '../../src/engine/index.js';
+import { serializePristine } from '../../src/engine/serialize.js';
 
 function generateBigReport(targetBytes: number): string {
   const parts: string[] = [
@@ -22,7 +23,7 @@ function generateBigReport(targetBytes: number): string {
 }
 
 describe('performance smoke', () => {
-  it('parse + serializeForView + serializeSource of ~1 MB under 1000 ms', () => {
+  it('parse + serializeForView + serializePristine of ~1 MB under 1000 ms', () => {
     const html = generateBigReport(1_000_000);
     expect(html.length).toBeGreaterThanOrEqual(1_000_000);
 
@@ -31,7 +32,7 @@ describe('performance smoke', () => {
     const t1 = performance.now();
     const view = serializeForView(doc);
     const t2 = performance.now();
-    const src = serializeSource(doc);
+    const src = serializePristine(doc);
     const t3 = performance.now();
 
     const parseMs = t1 - t0;
@@ -40,7 +41,7 @@ describe('performance smoke', () => {
     const totalMs = t3 - t0;
     console.log(
       `perf (~${(html.length / 1e6).toFixed(2)} MB): parse=${parseMs.toFixed(1)}ms ` +
-        `serializeForView=${viewMs.toFixed(1)}ms serializeSource=${sourceMs.toFixed(1)}ms ` +
+        `serializeForView=${viewMs.toFixed(1)}ms serializePristine=${sourceMs.toFixed(1)}ms ` +
         `total=${totalMs.toFixed(1)}ms`,
     );
 

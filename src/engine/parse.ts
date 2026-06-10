@@ -13,8 +13,13 @@ function isTemplate(el: Element): el is Template {
  * Pre-order DFS over all elements: visit the element, then its template
  * content (if any), then its children. This order is deterministic, so the
  * same source always yields the same id assignment.
+ *
+ * This is the single definition of document order in the engine — any code
+ * that needs to re-walk a tree with identical id assignment must use it.
+ *
+ * @internal
  */
-function walkElements(parent: ParentNode, visit: (el: Element) => void): void {
+export function walkElements(parent: ParentNode, visit: (el: Element) => void): void {
   for (const child of parent.childNodes) {
     if (!isElement(child)) continue;
     visit(child);
@@ -38,15 +43,15 @@ export function parseDocument(html: string): RedraDoc {
     idToNode.set(id, el);
     nodeToId.set(el, id);
   });
-  return { document, idToNode, nodeToId };
+  return { document, idToNode, nodeToId, source: html };
 }
 
 /** Returns the stable id of a node from this document, if it has one. */
-export function getElementId(doc: RedraDoc, node: unknown): string | undefined {
-  return doc.nodeToId.get(node as Element);
+export function getElementId(doc: RedraDoc, node: Element): string | undefined {
+  return doc.nodeToId.get(node);
 }
 
 /** Returns the element with the given stable id, if it exists. */
-export function getElementById(doc: RedraDoc, id: string): unknown | undefined {
+export function getElementById(doc: RedraDoc, id: string): Element | undefined {
   return doc.idToNode.get(id);
 }
