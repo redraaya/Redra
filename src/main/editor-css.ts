@@ -9,8 +9,13 @@
  * The handle pill / ghost / drop indicator live inside the overlay's closed
  * shadow root (src/preload/editor/overlay.ts) and carry their own styles —
  * page CSS cannot reach them, and this sheet cannot either.
+ *
+ * Everything is wrapped in @media screen: printToPDF (printBackground: true)
+ * renders print styles, and the hover wash/hairline must never end up in an
+ * exported PDF.
  */
 export const EDITOR_CSS = `
+@media screen {
 .redra-hover {
   background: rgba(28, 27, 25, 0.035);
   outline: 1px solid rgba(28, 27, 25, 0.13);
@@ -36,5 +41,6 @@ html.redra-dragging * {
     outline-color: rgba(236, 234, 230, 0.18);
     caret-color: #ff6b4a;
   }
+}
 }
 `;
