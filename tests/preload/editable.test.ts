@@ -61,3 +61,40 @@ describe('resolveEditable', () => {
     expect(resolveEditable(q('b'))).toBe(q('b'));
   });
 });
+
+describe('resolveEditable: div-карточки с голым текстом (полевой баг)', () => {
+  it('клик в голый текст карточки (target = div) редактирует div', () => {
+    mount(
+      '<div data-redra-id="r5"><b data-redra-id="r6">Зачем этот документ.</b>' +
+        ' Разобраться, как устроен документ.</div>',
+    );
+    expect(resolveEditable(q('div'))).toBe(q('div'));
+  });
+
+  it('клик в <b> внутри текстонесущего div редактирует весь div (одна сессия на карточку)', () => {
+    mount(
+      '<div data-redra-id="r5"><b data-redra-id="r6">Ключевое наблюдение.</b>' +
+        ' M-Video строит себя сразу в трёх слоях.</div>',
+    );
+    expect(resolveEditable(q('b'))).toBe(q('div'));
+  });
+
+  it('div-обёртка без прямого текста остаётся нередактируемой', () => {
+    mount(
+      '<div data-redra-id="r5"><p data-redra-id="r6">x</p><p data-redra-id="r7">y</p></div>',
+    );
+    expect(resolveEditable(q('div'))).toBeNull();
+  });
+
+  it('пробельный текст между дочерними блоками не делает обёртку редактируемой', () => {
+    mount(
+      '<div data-redra-id="r5">\n  <p data-redra-id="r6">x</p>\n  <p data-redra-id="r7">y</p>\n</div>',
+    );
+    expect(resolveEditable(q('div'))).toBeNull();
+  });
+
+  it('нештампованный div с текстом (создан скриптом) → null', () => {
+    mount('<div><b data-redra-id="r6">з</b> текст</div>');
+    expect(resolveEditable(q('div'))).toBeNull();
+  });
+});

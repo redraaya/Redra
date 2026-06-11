@@ -55,8 +55,10 @@ export const INLINE_EDITABLE_TAGS = new Set([
  *   elements are not in the source and are never editable;
  * - walk ancestors-or-self: the first BLOCK_EDITABLE tag (with id) wins;
  * - inline carriers accumulate on the way up; hitting a non-editable
- *   boundary (div, section, body, an unstamped wrapper…) falls back to the
- *   outermost stamped inline carrier seen, or null.
+ *   boundary: if the boundary element is a stamped TEXT-BEARING container
+ *   (direct non-whitespace text child — the «div-карточка» pattern of
+ *   AI-generated reports, field bug #1), the container itself is edited;
+ *   otherwise fall back to the outermost stamped inline carrier seen, or null.
  */
 export function resolveEditable(target: Element): HTMLElement | null {
   if (target.nodeType !== 1 || !target.hasAttribute(REDRA_ID_ATTR)) return null;
@@ -74,7 +76,20 @@ export function resolveEditable(target: Element): HTMLElement | null {
       if (stamped) topInline = el;
       continue;
     }
-    break; // non-editable boundary
+    // Non-editable boundary. Card-like containers (loose text directly in a
+    // stamped div/section/…) host the session themselves — one session for
+    // the whole card, so bold fragments and bare text edit seamlessly.
+    if (stamped && hasDirectText(el)) return el as HTMLElement;
+    break;
   }
   return topInline as HTMLElement | null;
+}
+
+/** True when the element has a direct non-whitespace text node child. */
+function hasDirectText(el: Element): boolean {
+  for (let i = 0; i < el.childNodes.length; i++) {
+    const child = el.childNodes[i]!;
+    if (child.nodeType === 3 && (child.textContent ?? '').trim() !== '') return true;
+  }
+  return false;
 }
