@@ -29,6 +29,9 @@ let wantEditing = true;
 window.addEventListener('DOMContentLoaded', () => {
   controller = createEditorController(window, bridge);
   controller.setEditing(wantEditing);
+  // Liveness beacon: main's smoke mode fails the run when this never arrives
+  // (e.g. the preload died on a bundling error — the editing layer IS the app).
+  ipcRenderer.send('doc:editorReady');
 });
 
 ipcRenderer.on('mode:set', (_event, state: ModeState) => {

@@ -18,6 +18,7 @@
  *
  * Channels (doc preload → main, send):
  *   'edit:committed'    (nonce: string)            — ack for 'edit:commit'
+ *   'doc:editorReady'   ()                         — editing layer booted (liveness beacon)
  *
  * Events (main → shell renderer):
  *   'doc:opened'        DocOpenedInfo
