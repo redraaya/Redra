@@ -19,6 +19,7 @@ import { DEFAULT_SETTINGS } from './lib/settings.js';
 import { tildify } from './lib/tildify.js';
 import { guardDocPush } from './lib/op-guard.js';
 import { createSaveFlow } from './save-flow.js';
+import { ScreenshotHarness } from './screenshot.js';
 import { SmokeHarness } from './smoke.js';
 import type {
   ExportResult,
@@ -41,6 +42,8 @@ const SHELL_STRIP_HEIGHT = 44;
 const cliArgs = process.argv.slice(app.isPackaged ? 1 : 2);
 const SMOKE = cliArgs.includes('--smoke');
 const cliFile = cliArgs.find((a) => !a.startsWith('-') && /\.html?$/i.test(a));
+const shotIdx = cliArgs.indexOf('--screenshot');
+const shotPath = shotIdx >= 0 ? (cliArgs[shotIdx + 1] ?? null) : null;
 
 // --- privileged scheme: must happen before app 'ready' -------------------
 registerRedraScheme();
@@ -48,6 +51,7 @@ registerRedraScheme();
 const perf = new PerfLog();
 const docManager = new DocumentManager(perf);
 const smoke = new SmokeHarness(SMOKE, perf, docManager);
+const shot = new ScreenshotHarness(shotPath);
 let recents: RecentsStore;
 let settingsStore: SettingsStore;
 /** Central session backups folder (userData/backups) — set in onReady. */
@@ -153,6 +157,11 @@ async function onReady(): Promise<void> {
   const pending = drainPendingOpen();
   if (pending) await pending;
   smoke.onReady(pending !== null);
+  shot.schedule(
+    () => win,
+    () => docView,
+    pending !== null,
+  );
 }
 
 /** Open the path queued by 'open-file' while no window existed, if any. */
