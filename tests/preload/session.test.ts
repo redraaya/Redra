@@ -23,12 +23,16 @@ describe('edit session commit pipeline', () => {
     expect(beginSession(document.querySelector('p')!, normalizeEditedHtml)).toBeNull();
   });
 
-  it('commit normalizes the stamped innerHTML into the op payload', () => {
+  it('commit normalizes the stamped innerHTML into the op payload (stamps stay — applyOps verifies them)', () => {
     const p = mountP('привет <b data-redra-id="r6">мир</b>');
     const s = beginSession(p, normalizeEditedHtml)!;
     p.innerHTML = 'привет <b data-redra-id="r6">всем</b><span style="color:red"> !</span>';
     const result = commitSession(s, normalizeEditedHtml)!;
-    expect(result.op).toEqual({ type: 'editText', id: 'r5', html: 'привет <b>всем</b> !' });
+    expect(result.op).toEqual({
+      type: 'editText',
+      id: 'r5',
+      html: 'привет <b data-redra-id="r6">всем</b> !',
+    });
     // live DOM stays exactly as the user left it (stamps and all)
     expect(p.innerHTML).toBe(
       'привет <b data-redra-id="r6">всем</b><span style="color:red"> !</span>',

@@ -1,3 +1,4 @@
+import { parseFragment, serialize } from 'parse5';
 import { describe, expect, it } from 'vitest';
 import {
   getElementById,
@@ -9,6 +10,7 @@ import {
   type Op,
   type RedraDoc,
 } from '../../src/engine/index.js';
+import { enforceStampProvenance } from '../../src/engine/ops.js';
 import { serializePristine } from '../../src/engine/serialize.js';
 
 /**
@@ -206,9 +208,10 @@ describe('template elements', () => {
   });
 });
 
-describe('editText strips data-redra-id from fragments', () => {
-  it('saved output has no data-redra-id, including template content inside the fragment', () => {
+describe('editText gates stamped fragments (provenance check)', () => {
+  it('saved output never contains data-redra-id; tag-mismatched stamps are downgraded, not trusted', () => {
     const doc = parseDocument(OPS_HTML);
+    // r7 is div#c, r8 is span#inner — both stamps below LIE about the tag.
     const out = serializeSource(doc, [
       {
         type: 'editText',
@@ -219,8 +222,183 @@ describe('editText strips data-redra-id from fragments', () => {
       },
     ]);
     expect(out).not.toContain('data-redra-id');
+    // b: inline whitelist → kept bare; template: provenance-required → gone.
     expect(out).toContain('<b>x</b>');
-    expect(out).toContain('<template><i>y</i></template>');
+    expect(out).not.toContain('<template');
+    expect(out).not.toContain('>y<');
+  });
+});
+
+/**
+ * Fixture for the provenance gate: elements a live edit may legitimately
+ * carry back (badge span, javascript: link — the file's OWN markup) plus
+ * verbatim-content tags (style/script/template).
+ */
+const GATE_HTML = `<!DOCTYPE html>
+<html><head><title>gate</title><style id="css">.tag{color:red}</style></head><body>
+<p id="host">old</p>
+<span id="badge" class="tag a">AY</span>
+<a id="lnk" href="javascript:toggle()" class="lnk">switch</a>
+<script id="js">draw();</script>
+<template id="tpl"><b class="t">T</b></template>
+</body></html>
+`;
+
+describe('provenance gate in applyOps (editText fragments)', () => {
+  function save(doc: RedraDoc, html: string): string {
+    return serializeSource(doc, [{ type: 'editText', id: rid(doc, 'host'), html }]);
+  }
+
+  it('a FORGED stamp on an injected <script> does not let it into the saved file (unknown id)', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(doc, 'x<script data-redra-id="r9999">payload()</script>y');
+    expect(out).not.toContain('payload');
+    expect(out).toContain('<p id="host">xy</p>');
+  });
+
+  it('a forged stamp reusing the id of an existing element of a DIFFERENT tag → script still removed', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(doc, `<script data-redra-id="${rid(doc, 'badge')}">payload()</script>`);
+    expect(out).not.toContain('payload');
+  });
+
+  it('tag mismatch on a non-whitelist element → unwrapped, attributes gone', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(
+      doc,
+      `<span data-redra-id="${rid(doc, 'lnk')}" onclick="evil()" class="x">t</span>`,
+    );
+    expect(out).toContain('<p id="host">t</p>');
+    expect(out).not.toContain('evil');
+  });
+
+  it('tag mismatch on an inline-whitelist element → kept bare (stamp and attrs stripped)', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(doc, `<b data-redra-id="${rid(doc, 'badge')}" class="x" onclick="e()">t</b>`);
+    expect(out).toContain('<p id="host"><b>t</b></p>');
+  });
+
+  it('downgraded <a> keeps a safe href, loses everything else', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(
+      doc,
+      '<a data-redra-id="r9999" href="https://e.com" onclick="e()" class="x">l</a>' +
+        '<a data-redra-id="r9998" href="javascript:alert(1)">m</a>',
+    );
+    expect(out).toContain('<a href="https://e.com">l</a>');
+    expect(out).toContain('<a>m</a>');
+    expect(out).not.toContain('onclick');
+    expect(out).not.toContain('javascript:alert');
+  });
+
+  it('a LEGIT stamped span whose class was mutated by page runtime is saved with the ORIGINAL class', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(
+      doc,
+      `<span data-redra-id="${rid(doc, 'badge')}" id="badge" class="tag a open">AYX</span>`,
+    );
+    expect(out).toContain('<span id="badge" class="tag a">AYX</span>');
+    expect(out).not.toContain('tag a open');
+  });
+
+  it('a legit stamped <a> with an ORIGINAL javascript: href keeps it — the file\'s own markup is sacred', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(
+      doc,
+      `<a data-redra-id="${rid(doc, 'lnk')}" id="lnk" href="javascript:toggle()" class="lnk">off</a>`,
+    );
+    expect(out).toContain('<a id="lnk" href="javascript:toggle()" class="lnk">off</a>');
+  });
+
+  it('a stamped <style> with EDITED content is dropped entirely', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(doc, `<style data-redra-id="${rid(doc, 'css')}">.tag{color:blue}</style>k`);
+    expect(out).not.toContain('color:blue');
+    expect(out).toContain('<p id="host">k</p>');
+  });
+
+  it('a stamped <style> with byte-identical content is kept, with original attributes', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(doc, `<style data-redra-id="${rid(doc, 'css')}">.tag{color:red}</style>k`);
+    expect(out).toContain('<p id="host"><style id="css">.tag{color:red}</style>k</p>');
+  });
+
+  it('a stamped <script> with identical content is kept; with edited content it is dropped', () => {
+    const doc = parseDocument(GATE_HTML);
+    const id = rid(doc, 'js');
+    const kept = save(doc, `<script data-redra-id="${id}">draw();</script>`);
+    expect(kept).toContain('<p id="host"><script id="js">draw();</script></p>');
+    const dropped = save(doc, `<script data-redra-id="${id}">draw();steal();</script>`);
+    expect(dropped).not.toContain('steal');
+    expect(dropped).toContain('<p id="host"></p>');
+  });
+
+  it('a stamped <template> with identical content is kept (stamps inside its content are not "content")', () => {
+    const doc = parseDocument(GATE_HTML);
+    const innerB = findId(
+      doc,
+      (el) => el.tagName === 'b' && el.attrs.some((a) => a.name === 'class' && a.value === 't'),
+      'template inner b',
+    );
+    const out = save(
+      doc,
+      `<template data-redra-id="${rid(doc, 'tpl')}">` +
+        `<b class="t" data-redra-id="${innerB}">T</b></template>`,
+    );
+    expect(out).toContain('<p id="host"><template id="tpl"><b class="t">T</b></template></p>');
+    expect(out).not.toContain('data-redra-id');
+  });
+
+  it('a stamped <template> with edited content is dropped entirely', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(
+      doc,
+      `<template data-redra-id="${rid(doc, 'tpl')}"><b class="t">CHANGED</b></template>z`,
+    );
+    expect(out).not.toContain('CHANGED');
+    expect(out).toContain('<p id="host">z</p>');
+  });
+
+  it('a DUPLICATED stamped span (copy-paste) saves both copies with original attrs, no stamps', () => {
+    const doc = parseDocument(GATE_HTML);
+    const id = rid(doc, 'badge');
+    const out = save(
+      doc,
+      `<span data-redra-id="${id}" id="badge" class="tag a">AY</span> и ` +
+        `<span data-redra-id="${id}" id="badge" class="tag a">AY</span>`,
+    );
+    expect(out).toContain(
+      '<span id="badge" class="tag a">AY</span> и <span id="badge" class="tag a">AY</span>',
+    );
+    expect(out).not.toContain('data-redra-id');
+  });
+
+  it('DIRECT: enforceStampProvenance mutates a parsed fragment in place', () => {
+    const doc = parseDocument(GATE_HTML);
+    const fragment = parseFragment(
+      `a<span data-redra-id="${rid(doc, 'badge')}" class="tag a open">AY</span>` +
+        '<script data-redra-id="r9999">payload()</script>b',
+    );
+    enforceStampProvenance(fragment, doc.idToNode);
+    expect(serialize(fragment)).toBe('a<span id="badge" class="tag a">AY</span>b');
+  });
+
+  it('DIRECT: unstamped elements pass the gate untouched (normalize already whitelisted them)', () => {
+    const doc = parseDocument(GATE_HTML);
+    const fragment = parseFragment('x<b>y</b><a href="https://e.com">l</a>');
+    enforceStampProvenance(fragment, doc.idToNode);
+    expect(serialize(fragment)).toBe('x<b>y</b><a href="https://e.com">l</a>');
+  });
+
+  it('valid stamped wrapper with a forged stamped script INSIDE: wrapper kept, script gone', () => {
+    const doc = parseDocument(GATE_HTML);
+    const out = save(
+      doc,
+      `<span data-redra-id="${rid(doc, 'badge')}" class="tag a">` +
+        'AY<script data-redra-id="r9999">payload()</script></span>',
+    );
+    expect(out).toContain('<span id="badge" class="tag a">AY</span>');
+    expect(out).not.toContain('payload');
   });
 });
 
