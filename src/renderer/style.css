@@ -153,6 +153,11 @@ body {
   display: none;
 }
 
+/* The UA sheet only hides [hidden] on HTML elements — SVG needs this rule. */
+.tb-btn svg[hidden] {
+  display: none;
+}
+
 /* --- start screen --------------------------------------------------------- */
 
 #start {
