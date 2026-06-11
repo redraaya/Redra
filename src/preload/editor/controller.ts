@@ -75,9 +75,12 @@ export function createEditorController(
   async function pushOp(op: Parameters<RedraDocBridge['pushOp']>[0]): Promise<void> {
     const res = await bridge.pushOp(op);
     if (!res.ok) {
-      // Main is the source of truth; a rejected push means the stacks are
-      // about to diverge. Log loudly (no auto-resync in v1 — see spec A4).
+      // Main is the source of truth: the journal never recorded this op, so
+      // the matching local entry (pushed just before this call) must go too —
+      // revert the DOM via its stored inverse and drop it from the stack.
+      // User-visible: the action bounces back. Correct v1 behaviour.
       console.error('[redra] ops:push rejected:', res.error, op);
+      history.undoAndDiscard();
     }
   }
 

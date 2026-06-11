@@ -205,7 +205,10 @@ export class Overlay {
     ghost.querySelectorAll(`[${REDRA_ID_ATTR}]`).forEach((el) => {
       el.removeAttribute(REDRA_ID_ATTR);
     });
-    ghost.removeAttribute('id'); // never duplicate page ids in the live DOM
+    // Never duplicate page ids in the live DOM — the root AND every
+    // descendant (page CSS/scripts may target #ids anywhere in the subtree).
+    ghost.removeAttribute('id');
+    ghost.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
     for (const [prop, value] of [
       ['position', 'fixed'],
       ['width', `${rect.width || 200}px`],

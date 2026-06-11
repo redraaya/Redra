@@ -55,6 +55,19 @@ export class LocalHistory {
     return true;
   }
 
+  /**
+   * Roll back the LATEST entry after main REJECTED its ops:push: revert it
+   * in the live DOM and remove it from the stack entirely (it must not be
+   * redoable), so the local stack stays in lockstep with the journal that
+   * never recorded the op. Entries are pushed before the push resolves, so
+   * the rejected op is always the newest entry.
+   */
+  undoAndDiscard(): void {
+    if (!this.canUndo) return;
+    this.undo();
+    this.entries.length = this.cursor; // drop the entry — no redo tail
+  }
+
   /** Re-apply the next entry in the live DOM. False when there is none. */
   redo(): boolean {
     if (!this.canRedo) return false;
