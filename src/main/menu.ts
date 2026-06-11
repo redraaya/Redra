@@ -5,6 +5,12 @@ export interface MenuHandlers {
   open(): void;
   save(): void;
   saveAs(): void;
+  /** Cmd+Z — routed to the doc view's editing layer (A4 logic decides). */
+  undo(): void;
+  /** Cmd+Shift+Z. */
+  redo(): void;
+  /** «Просмотр» checkbox, Cmd+E. Receives the NEW checked state. */
+  togglePreview(checked: boolean): void;
 }
 
 export function buildAppMenu(handlers: MenuHandlers): void {
@@ -26,8 +32,35 @@ export function buildAppMenu(handlers: MenuHandlers): void {
   }
   template.push({ label: 'Файл', submenu: fileSubmenu });
 
-  // Standard Edit menu — copy/paste must keep working inside the document view.
-  template.push({ label: 'Правка', role: 'editMenu' });
+  // Undo/Redo are OURS (journal + local DOM inverse stack in the doc preload);
+  // clipboard/selection stay native roles so they keep working everywhere.
+  template.push({
+    label: 'Правка',
+    submenu: [
+      { label: 'Отменить', accelerator: 'CmdOrCtrl+Z', click: () => handlers.undo() },
+      { label: 'Повторить', accelerator: 'CmdOrCtrl+Shift+Z', click: () => handlers.redo() },
+      { type: 'separator' },
+      { role: 'cut', label: 'Вырезать' },
+      { role: 'copy', label: 'Скопировать' },
+      { role: 'paste', label: 'Вставить' },
+      { role: 'selectAll', label: 'Выделить всё' },
+    ],
+  });
+
+  template.push({
+    label: 'Вид',
+    submenu: [
+      {
+        id: 'view-preview',
+        label: 'Просмотр',
+        type: 'checkbox',
+        checked: false,
+        accelerator: 'CmdOrCtrl+E',
+        click: (item) => handlers.togglePreview(item.checked),
+      },
+    ],
+  });
+
   template.push({ label: 'Окно', role: 'windowMenu' });
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));

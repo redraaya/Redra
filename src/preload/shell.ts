@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type {
   DirtyState,
   DocOpenedInfo,
+  ModeState,
   OpenResult,
   PerfEntry,
   RedraShellApi,
@@ -21,6 +22,9 @@ const api: RedraShellApi = {
   },
   onDirtyChanged: (cb: (state: DirtyState) => void) => {
     ipcRenderer.on('doc:dirtyChanged', (_event, state: DirtyState) => cb(state));
+  },
+  onModeChanged: (cb: (state: ModeState) => void) => {
+    ipcRenderer.on('mode:changed', (_event, state: ModeState) => cb(state));
   },
 };
 
