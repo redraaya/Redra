@@ -2,11 +2,14 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type {
   DirtyState,
   DocOpenedInfo,
+  ExportResult,
   ModeState,
   OpenResult,
   PerfEntry,
+  RecentEntry,
   RedraShellApi,
   SaveResult,
+  Settings,
 } from '../shared/ipc.js';
 
 const api: RedraShellApi = {
@@ -15,7 +18,12 @@ const api: RedraShellApi = {
   pathForFile: (file: File) => webUtils.getPathForFile(file),
   save: () => ipcRenderer.invoke('doc:save') as Promise<SaveResult>,
   saveAs: () => ipcRenderer.invoke('doc:saveAs') as Promise<SaveResult>,
-  getRecents: () => ipcRenderer.invoke('recents:get') as Promise<string[]>,
+  exportPdf: () => ipcRenderer.invoke('doc:exportPdf') as Promise<ExportResult>,
+  togglePreview: () => ipcRenderer.send('mode:toggle'),
+  getRecents: () => ipcRenderer.invoke('recents:get') as Promise<RecentEntry[]>,
+  getSettings: () => ipcRenderer.invoke('settings:get') as Promise<Settings>,
+  setSettings: (patch: Partial<Settings>) =>
+    ipcRenderer.invoke('settings:set', patch) as Promise<Settings>,
   getPerf: () => ipcRenderer.invoke('perf:get') as Promise<PerfEntry[]>,
   onDocOpened: (cb: (info: DocOpenedInfo) => void) => {
     ipcRenderer.on('doc:opened', (_event, info: DocOpenedInfo) => cb(info));

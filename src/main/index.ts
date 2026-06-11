@@ -1,18 +1,28 @@
 import { app, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, shell } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerRedraScheme, installRedraProtocolHandler } from './protocol.js';
 import { DocumentManager } from './document-manager.js';
 import { RecentsStore } from './recents-store.js';
-import { buildAppMenu } from './menu.js';
+import { SettingsStore } from './settings-store.js';
+import { buildAppMenu, setBackupMenuChecked, setDocMenuEnabled } from './menu.js';
 import { EDITOR_CSS } from './editor-css.js';
 import { PerfLog } from './lib/perf.js';
 import { senderMatches } from './lib/sender.js';
+import { tildify } from './lib/tildify.js';
 import { validateOp } from './lib/validate-op.js';
 import { guardDocPush } from './lib/op-guard.js';
-import type { OpPushResult, OpUndoResult, OpenResult, SaveResult } from '../shared/ipc.js';
+import type {
+  OpPushResult,
+  OpUndoResult,
+  OpenResult,
+  RecentEntry,
+  SaveResult,
+  Settings,
+} from '../shared/ipc.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +42,7 @@ registerRedraScheme();
 const perf = new PerfLog();
 const docManager = new DocumentManager(perf);
 let recents: RecentsStore;
+let settingsStore: SettingsStore;
 
 let win: BrowserWindow | null = null;
 let docView: WebContentsView | null = null;
@@ -81,14 +92,22 @@ async function onReady(): Promise<void> {
   recents = new RecentsStore(path.join(app.getPath('userData'), 'recents.json'));
   await recents.load();
 
-  buildAppMenu({
-    open: () => void openViaDialog(),
-    save: () => void doSave(false),
-    saveAs: () => void doSave(true),
-    undo: () => docView?.webContents.send('edit:undo'),
-    redo: () => docView?.webContents.send('edit:redo'),
-    togglePreview: (checked) => setPreview(checked),
-  });
+  settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
+  await settingsStore.load();
+  docManager.setBackupEnabled(settingsStore.get().backupOnFirstSave);
+
+  buildAppMenu(
+    {
+      open: () => void openViaDialog(),
+      save: () => void doSave(false),
+      saveAs: () => void doSave(true),
+      undo: () => docView?.webContents.send('edit:undo'),
+      redo: () => docView?.webContents.send('edit:redo'),
+      togglePreview: (checked) => setPreview(checked),
+      toggleBackup: (checked) => void applySettings({ backupOnFirstSave: checked }),
+    },
+    { backupChecked: settingsStore.get().backupOnFirstSave },
+  );
   registerIpc();
   createWindow(readyAt);
 
@@ -253,6 +272,16 @@ function layoutDocView(): void {
   });
 }
 
+// --- settings ----------------------------------------------------------------
+
+/** Single entry point for settings changes (IPC and menu): persist + apply. */
+async function applySettings(patch: unknown): Promise<Settings> {
+  const next = await settingsStore.set(patch);
+  docManager.setBackupEnabled(next.backupOnFirstSave);
+  setBackupMenuChecked(next.backupOnFirstSave);
+  return next;
+}
+
 // --- editing mode + edit-session commit -------------------------------------
 
 /** Toggle «Просмотр»: editing layer off in the doc view, pill in the shell. */
@@ -345,6 +374,7 @@ async function openDocument(filePath: string): Promise<OpenResult> {
 
     const name = path.basename(opened.filePath);
     win?.setTitle(`${name} — Redra`);
+    setDocMenuEnabled(true);
     win?.webContents.send('doc:opened', { path: opened.filePath, name });
     win?.webContents.send('doc:dirtyChanged', { dirty: opened.journal.dirty });
     // A fresh document always starts in live editing, never in «Просмотр».
@@ -410,7 +440,7 @@ async function doSave(saveAs: boolean): Promise<SaveResult> {
     win?.setTitle(`${name} — Redra`);
     win?.webContents.send('doc:dirtyChanged', { dirty: cur.journal.dirty });
   } else if (saved.conflict) {
-    // Placeholder until the real dialog in Stage 4.
+    // Placeholder until the real dialog in 4.2.
     console.warn('[save] conflict: file on disk changed since open/last save');
   } else if (!saved.canceled) {
     // Generic failure (apply/serialize/write) — must never be silent.
@@ -455,7 +485,27 @@ function registerIpc(): void {
     if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies SaveResult;
     return doSave(true);
   });
-  ipcMain.handle('recents:get', (event) => (fromShell(event) ? recents.get() : []));
+  ipcMain.on('mode:toggle', (event) => {
+    if (!senderMatches(event, win?.webContents)) return;
+    if (!docManager.currentDoc) return; // no doc — nothing to preview
+    setPreview(!previewOn);
+  });
+  ipcMain.handle('recents:get', (event): RecentEntry[] => {
+    if (!fromShell(event)) return [];
+    const home = os.homedir();
+    return recents.get().map((e) => ({
+      ...e,
+      name: path.basename(e.path),
+      dir: tildify(path.dirname(e.path), home),
+    }));
+  });
+  ipcMain.handle('settings:get', (event) =>
+    fromShell(event) ? settingsStore.get() : ({ shellTheme: 'system', backupOnFirstSave: true } satisfies Settings),
+  );
+  ipcMain.handle('settings:set', (event, patch: unknown) => {
+    if (!fromShell(event)) return settingsStore.get();
+    return applySettings(patch);
+  });
   ipcMain.handle('perf:get', (event) => (fromShell(event) ? perf.all() : []));
 
   // --- doc-view channels (Stage 3 editing bridge) ---
