@@ -11,7 +11,12 @@ import {
 
 /**
  * Every raw input used anywhere in this file. The idempotence suite at the
- * bottom runs over all of them, so new fixtures must be added here.
+ * bottom runs over all of them, so new fixtures must be registered via fx().
+ *
+ * Stamped fixtures (inputs containing data-redra-id) ARE in this list:
+ * normalizeEditedHtml keeps the stamps in its output (they are provenance
+ * claims for applyOps), so re-normalizing takes the same passthrough branch
+ * and the function is idempotent over both modes.
  */
 const FIXTURES: string[] = [];
 
@@ -28,8 +33,10 @@ describe('normalizeEditedHtml: allowed elements and attributes', () => {
     ).toBe('bold');
   });
 
-  it('strips class and data-redra-id from a kept <b>', () => {
-    expect(normalizeEditedHtml(fx('<b class="x" data-redra-id="r4">text</b>'))).toBe('<b>text</b>');
+  it('a STAMPED <b> is original markup: class AND stamp survive (the stamp is the provenance claim for applyOps)', () => {
+    expect(normalizeEditedHtml(fx('<b class="x" data-redra-id="r4">text</b>'))).toBe(
+      '<b class="x" data-redra-id="r4">text</b>',
+    );
   });
 
   it('strips every attribute from kept formatting tags', () => {
@@ -61,15 +68,104 @@ describe('normalizeEditedHtml: allowed elements and attributes', () => {
     ).toBe('<b>deep</b> text');
   });
 
-  it('never lets data-redra-id survive on any kept element (fragments come from the stamped live DOM)', () => {
-    const out = normalizeEditedHtml(
-      fx(
-        '<b data-redra-id="r1">a</b><a data-redra-id="r2" href="https://e.com">l</a>' +
-          '<span data-redra-id="r3"><i data-redra-id="r4">i</i></span>',
-      ),
+  it('keeps stamps on stamped elements untouched — they are claims, verified later by applyOps against the pristine source', () => {
+    const raw = fx(
+      '<b data-redra-id="r1">a</b><a data-redra-id="r2" href="https://e.com">l</a>' +
+        '<span data-redra-id="r3"><i data-redra-id="r4">i</i></span>',
     );
-    expect(out).toBe('<b>a</b><a href="https://e.com">l</a><i>i</i>');
-    expect(out).not.toContain('data-redra-id');
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+});
+
+describe('normalizeEditedHtml: STAMPED elements pass through AS-IS (stamp included)', () => {
+  it('keeps a class-styled badge span in a table cell after typing one letter (field report)', () => {
+    const raw = fx('<span class="tag a" data-redra-id="r7">AYX</span>');
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('keeps a badge span when new text is typed NEXT to it in the cell', () => {
+    const raw = fx('<span class="tag a" data-redra-id="r7">AY</span> ok');
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('a stamped nested <ul> inside an edited <li> survives as a real list, not <br>s', () => {
+    const raw = fx('one<ul data-redra-id="r5"><li data-redra-id="r6">sub</li></ul>');
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('a stamped div keeps its tag and class — no <br> conversion for original blocks', () => {
+    const raw = fx('a<div data-redra-id="r2" class="box">b</div>');
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('a stamped img keeps its relative src', () => {
+    const raw = fx('<img data-redra-id="r3" src="img/chart.png" alt="график" width="40">');
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('LIVE attributes survive untouched, suspicious ones included — applyOps replaces them with the verified originals anyway', () => {
+    const raw = fx('<img data-redra-id="r3" src="javascript:alert(1)" alt="x">');
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('a stamped a with a data: href keeps it for the gate to judge', () => {
+    const raw = fx('<a data-redra-id="r3" href="data:text/html,x" class="lnk">x</a>');
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('on* handlers stay on stamped elements — provenance is verified by applyOps, not here', () => {
+    const raw = fx(
+      '<div data-redra-id="r2" onclick="evil()" onmouseover="evil()" class="c" id="z">x</div>',
+    );
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('a stamped table keeps its full structure and attributes', () => {
+    const raw = fx(
+      '<table data-redra-id="r1" border="1"><tbody data-redra-id="r2">' +
+        '<tr data-redra-id="r3"><td data-redra-id="r4" colspan="2">a</td></tr>' +
+        '</tbody></table>',
+    );
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('a stamped <style> keeps its content verbatim, stamp included', () => {
+    const raw = fx('<style data-redra-id="r8">.tag{color:red}</style>x');
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('a stamped <script> keeps its content verbatim, stamp included', () => {
+    const raw = fx('<script data-redra-id="r8">draw();</script>x');
+    expect(normalizeEditedHtml(raw)).toBe(raw);
+  });
+
+  it('an UNSTAMPED script next to a stamped one is still dropped', () => {
+    expect(
+      normalizeEditedHtml(fx('<script data-redra-id="r8">draw();</script><script>evil()</script>')),
+    ).toBe('<script data-redra-id="r8">draw();</script>');
+  });
+
+  it('new unstamped junk INSIDE a stamped block is still cleaned by the whitelist', () => {
+    expect(
+      normalizeEditedHtml(
+        fx('<div data-redra-id="r2" class="box"><span style="font-weight:700">t</span></div>'),
+      ),
+    ).toBe('<div data-redra-id="r2" class="box">t</div>');
+  });
+
+  it('a new style-span WRAPPING a stamped <b> unwraps; the b keeps its attrs and stamp', () => {
+    expect(
+      normalizeEditedHtml(
+        fx('<span style="color:red"><b data-redra-id="r4" class="k">x</b></span>'),
+      ),
+    ).toBe('<b data-redra-id="r4" class="k">x</b>');
+  });
+
+  it('stamps survive at every depth (forged ones are downgraded later, in applyOps)', () => {
+    const raw = fx(
+      '<div data-redra-id="r1"><span data-redra-id="r2"><i data-redra-id="r3">x</i></span></div>',
+    );
+    expect(normalizeEditedHtml(raw)).toBe(raw);
   });
 });
 
@@ -296,8 +392,9 @@ describe('normalizeEditedHtml: integration with editText/serializeSource', () =>
     const doc = parseDocument(
       '<!DOCTYPE html><html><head><title>t</title></head><body><p id="msg">old</p></body></html>',
     );
+    // All junk here is UNSTAMPED (new content typed/pasted into the session).
     const raw =
-      '<span style="color:red" data-redra-id="r9">new</span>' +
+      '<span style="color:red">new</span>' +
       '<div><font face="Arial">second <b class="x">line</b></font></div>';
     const html = normalizeEditedHtml(raw);
     expect(html).toBe('new<br>second <b>line</b>');
@@ -309,5 +406,26 @@ describe('normalizeEditedHtml: integration with editText/serializeSource', () =>
     expect(saved).not.toContain('style=');
     expect(saved).not.toContain('data-redra-id');
     expect(saved).not.toContain('font');
+  });
+
+  it('an edited td keeps its badge span (file\'s own markup) in the SAVED file', () => {
+    const doc = parseDocument(
+      '<!DOCTYPE html><html><head><title>t</title></head><body>' +
+        '<table><tr><td><span class="tag a">AY</span></td></tr></table>' +
+        '</body></html>',
+    );
+    // The live DOM serves the STAMPED copy: the original span carries the
+    // stamp, the typed letter appears as plain text inside it. The stamp
+    // rides INSIDE the op payload — applyOps verifies it against the
+    // pristine source and swaps in the original attributes.
+    const spanId = tagId(doc, 'span');
+    const raw = `<span class="tag a" data-redra-id="${spanId}">AYX</span>`;
+    const html = normalizeEditedHtml(raw);
+    expect(html).toBe(raw);
+
+    const ops: Op[] = [{ type: 'editText', id: tagId(doc, 'td'), html }];
+    const saved = serializeSource(doc, ops);
+    expect(saved).toContain('<td><span class="tag a">AYX</span></td>');
+    expect(saved).not.toContain('data-redra-id');
   });
 });

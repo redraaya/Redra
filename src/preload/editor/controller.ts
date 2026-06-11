@@ -154,6 +154,24 @@ export function createEditorController(
 
   // --- block hover + delete (A2) ----------------------------------------------
 
+  /**
+   * A block is treated as a page wrapper (no wash, no pill on hover) only
+   * when its rect fills BOTH the viewport AND nearly the whole document:
+   * a long table is taller than the viewport too, but the document around
+   * it is much taller still — it keeps its hover UI. 0.9 instead of 1.0 so
+   * wrappers with small top/bottom page margins (padding'ed report bodies,
+   * slide frames) are still caught.
+   */
+  const FULL_PAGE_BLOCK_RATIO = 0.9;
+
+  function isPageWrapper(block: HTMLElement): boolean {
+    const height = block.getBoundingClientRect().height;
+    return (
+      height >= FULL_PAGE_BLOCK_RATIO * win.innerHeight &&
+      height >= FULL_PAGE_BLOCK_RATIO * doc.documentElement.scrollHeight
+    );
+  }
+
   function clearHover(): void {
     if (hoverBlock) {
       hoverBlock.classList.remove('redra-hover');
@@ -230,7 +248,29 @@ export function createEditorController(
     const target = asElement(e.target);
     if (!target) return;
     if (overlay.containsTarget(target)) return; // hovering the pill keeps it alive
-    const block = resolveBlock(target, win);
+    let block = resolveBlock(target, win);
+    // For a NESTED block the trip to the pill crosses its PARENT container,
+    // which resolves as a block of its own — without this guard the pill
+    // jumps to the parent before it can be clicked. Keep the current block
+    // while the pointer is over one of its ancestors AND still within reach
+    // of the pill.
+    if (
+      block &&
+      hoverBlock &&
+      block !== hoverBlock &&
+      block.contains(hoverBlock) &&
+      withinHandleReach(e)
+    ) {
+      return;
+    }
+    // Page-wrapper noise: a top-level wrapper that fills the viewport AND
+    // the document would highlight the whole page as one "block" — useless
+    // wash, useless pill. Suppress the hover UI for it (resolveBlock stays
+    // pure; nested content inside still resolves to its own block on its
+    // own mouseover).
+    if (block && isPageWrapper(block)) {
+      block = null;
+    }
     // The pill floats LEFT of the block, so the pointer crosses "no man's
     // land" on its way there — mouseover fires on the page background where
     // no block resolves, and without this guard the pill vanishes before it

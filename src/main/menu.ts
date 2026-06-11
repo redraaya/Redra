@@ -12,8 +12,10 @@ export interface MenuHandlers {
   redo(): void;
   /** «Просмотр» checkbox, Cmd+E. Receives the NEW checked state. */
   togglePreview(checked: boolean): void;
-  /** «Создавать резервную копию (.bak)» checkbox. Receives the NEW checked state. */
+  /** «Создавать резервную копию» checkbox. Receives the NEW checked state. */
   toggleBackup(checked: boolean): void;
+  /** «Показать резервные копии» — opens the central backups folder. */
+  showBackups(): void;
 }
 
 export interface MenuOptions {
@@ -59,10 +61,16 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
     { type: 'separator' },
     {
       id: 'file-backup',
-      label: 'Создавать резервную копию (.bak)',
+      label: 'Создавать резервную копию',
       type: 'checkbox',
       checked: options.backupChecked,
       click: (item) => handlers.toggleBackup(item.checked),
+    },
+    {
+      id: 'file-show-backups',
+      label: 'Показать резервные копии',
+      // Always enabled: the folder is per-app, not per-document.
+      click: () => handlers.showBackups(),
     },
   ];
   if (!isMac) {

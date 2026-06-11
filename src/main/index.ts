@@ -2,11 +2,13 @@ import { app, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, shell } fro
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerRedraScheme, installRedraProtocolHandler } from './protocol.js';
 import { DocumentManager } from './document-manager.js';
+import { BackupStore } from './lib/backups.js';
 import { RecentsStore } from './recents-store.js';
 import { SettingsStore } from './settings-store.js';
 import { buildAppMenu, setBackupMenuChecked, setDocMenuEnabled } from './menu.js';
@@ -47,6 +49,10 @@ const perf = new PerfLog();
 const docManager = new DocumentManager(perf);
 let recents: RecentsStore;
 let settingsStore: SettingsStore;
+/** Central session backups folder (userData/backups) — set in onReady. */
+let backupsDir = '';
+/** How many central backups survive a prune. */
+const BACKUPS_KEEP = 30;
 
 let win: BrowserWindow | null = null;
 let docView: WebContentsView | null = null;
@@ -108,6 +114,15 @@ async function onReady(): Promise<void> {
   await settingsStore.load();
   docManager.setBackupEnabled(settingsStore.get().backupOnFirstSave);
 
+  // Central backups instead of .bak files next to the user's documents.
+  // Existing .bak files are the user's property — never touched or removed.
+  backupsDir = path.join(app.getPath('userData'), 'backups');
+  const store = new BackupStore(backupsDir);
+  docManager.setBackupWriter(async (filePath, bytes) => {
+    await store.backupFor(filePath, bytes);
+    await store.prune(BACKUPS_KEEP);
+  });
+
   buildAppMenu(
     {
       open: () => void openViaDialog(),
@@ -118,6 +133,7 @@ async function onReady(): Promise<void> {
       redo: () => docView?.webContents.send('edit:redo'),
       togglePreview: (checked) => setPreview(checked),
       toggleBackup: (checked) => void applySettings({ backupOnFirstSave: checked }),
+      showBackups: () => void showBackupsFolder(),
     },
     { backupChecked: settingsStore.get().backupOnFirstSave },
   );
@@ -367,6 +383,14 @@ async function applySettings(patch: unknown): Promise<Settings> {
   docManager.setBackupEnabled(next.backupOnFirstSave);
   setBackupMenuChecked(next.backupOnFirstSave);
   return next;
+}
+
+/** «Показать резервные копии»: open userData/backups in Finder (create it first so openPath never fails on a fresh install). */
+async function showBackupsFolder(): Promise<void> {
+  if (!backupsDir) return;
+  await mkdir(backupsDir, { recursive: true }).catch(() => undefined);
+  const err = await shell.openPath(backupsDir);
+  if (err) console.error('[backups] openPath failed:', err);
 }
 
 // --- editing mode + edit-session commit -------------------------------------
