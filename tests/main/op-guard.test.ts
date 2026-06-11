@@ -83,3 +83,30 @@ describe('guardDocPush (full ops:push gate)', () => {
     expect(guardDocPush('d1', raw, 'd1', doc, [deleteBlock('r3')]).ok).toBe(false);
   });
 });
+
+describe('checkOpAgainstActive: template content (mirrors engine markSubtreeRemoved)', () => {
+  // <html>=t0 <head>=t1 <body>=t2 <template>=t3 [content: <tr>=t4 <td>=t5] <p>=t6
+  const tdoc = parseDocument(
+    '<!doctype html><html><head></head><body>' +
+      '<template><tr><td>cell</td></tr></template><p>after</p>' +
+      '</body></html>',
+  );
+  const tpl = 'r3';
+  const insideTr = 'r4';
+  const insideTd = 'r5';
+
+  it('rejects ops inside template content after editText on the template', () => {
+    expect(checkOpAgainstActive(editText(insideTd), [editText(tpl)], tdoc).ok).toBe(false);
+    expect(checkOpAgainstActive(deleteBlock(insideTr), [editText(tpl)], tdoc).ok).toBe(false);
+  });
+
+  it('rejects ops inside template content after deleteBlock on the template', () => {
+    expect(checkOpAgainstActive(editText(insideTd), [deleteBlock(tpl)], tdoc).ok).toBe(false);
+    expect(checkOpAgainstActive(moveBlock(insideTr, null), [deleteBlock(tpl)], tdoc).ok).toBe(false);
+  });
+
+  it('still allows re-editText on the template itself and ops on siblings', () => {
+    expect(checkOpAgainstActive(editText(tpl), [editText(tpl)], tdoc).ok).toBe(true);
+    expect(checkOpAgainstActive(editText('r6'), [editText(tpl)], tdoc).ok).toBe(true);
+  });
+});
