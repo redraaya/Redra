@@ -99,7 +99,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     const win = deps.getWin();
     let asPath: string | undefined;
     if (saveAs) {
-      if (!win) return { ok: false, error: 'no window' };
+      if (!win || win.isDestroyed()) return { ok: false, error: 'no window' };
       const result = await dialog.showSaveDialog(win, {
         defaultPath: cur.filePath,
         filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
@@ -115,11 +115,14 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     // re-ask instead of falling into the generic-error branch. Bounded so a
     // pathological writer cannot trap the user in the dialog forever.
     for (let attempt = 0; !saved.ok && saved.conflict && attempt < 3; attempt++) {
-      if (deps.smoke || !win) {
+      // Окно перечитывается после каждого await: захваченная до save() ссылка
+      // могла указывать на уже уничтоженное окно («Object has been destroyed»).
+      const w = deps.getWin();
+      if (deps.smoke || !w || w.isDestroyed()) {
         console.warn('[save] conflict: file on disk changed since open/last save');
         return saved;
       }
-      const { response } = await dialog.showMessageBox(win, {
+      const { response } = await dialog.showMessageBox(w, {
         type: 'warning',
         message: 'Файл на диске изменён другой программой',
         detail: 'Перезаписать его версией из Redra? Внешние изменения будут потеряны.',
@@ -137,9 +140,14 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     }
 
     if (saved.ok) {
-      const name = path.basename(saved.path);
-      win?.setTitle(`${name} — Redra`);
-      win?.webContents.send('doc:dirtyChanged', { dirty: cur.journal.dirty });
+      // Окно перечитывается после await save(): окно могло быть закрыто за
+      // время записи — setTitle по мёртвой ссылке кидает исключение.
+      const w = deps.getWin();
+      if (w && !w.isDestroyed()) {
+        const name = path.basename(saved.path);
+        w.setTitle(`${name} — Redra`);
+        w.webContents.send('doc:dirtyChanged', { dirty: cur.journal.dirty });
+      }
     } else if (!saved.canceled) {
       // Generic failure (apply/serialize/write) — must never be silent.
       const message = saved.error ?? 'неизвестная ошибка';
@@ -156,11 +164,16 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
    */
   async function exportPdf(): Promise<ExportResult> {
     const cur = docManager.currentDoc;
-    const view = deps.getDocView();
-    const win = deps.getWin();
-    if (!cur || !view || !win) return { ok: false, error: 'Документ не открыт' };
+    if (!cur || !deps.getDocView() || !deps.getWin()) {
+      return { ok: false, error: 'Документ не открыт' };
+    }
 
     await deps.commitActiveEdit();
+
+    // Окно перечитывается после await: захваченная до него ссылка могла
+    // указывать на уже уничтоженное окно («Object has been destroyed»).
+    const win = deps.getWin();
+    if (!win || win.isDestroyed()) return { ok: false, canceled: true };
 
     const pdfName = path.basename(cur.filePath).replace(/\.html?$/i, '') + '.pdf';
     const result = await dialog.showSaveDialog(win, {
@@ -168,6 +181,10 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
     });
     if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+
+    // То же для doc-view: пока висел диалог, документ могли закрыть.
+    const view = deps.getDocView();
+    if (!view || view.webContents.isDestroyed()) return { ok: false, canceled: true };
 
     try {
       const t0 = performance.now();
