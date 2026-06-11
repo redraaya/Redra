@@ -1,4 +1,5 @@
 import { getElementById, getElementId } from '../../engine/index.js';
+import { isTemplate, walkElements } from '../../engine/parse.js';
 import type { Element, Op, RedraDoc } from '../../engine/index.js';
 import { validateOp } from './validate-op.js';
 
@@ -8,7 +9,10 @@ export type GuardPushResult = { ok: true; op: Op } | { ok: false; error: string 
 /**
  * Reject at PUSH time the ops that applyOps would reject at SAVE time —
  * ops targeting elements inside subtrees already consumed by an active
- * editText/deleteBlock. Mirrors the engine's `removed` bookkeeping exactly:
+ * editText/deleteBlock. Mirrors the engine's `removed` bookkeeping by
+ * construction: the blocked set is built by walking DOWN from each root with
+ * the engine's own walkElements (template-content aware), exactly like the
+ * engine's markSubtreeRemoved does at save time:
  *
  *  - editText X replaces X's CHILDREN → descendants of X are blocked, but X
  *    itself stays legal (re-editText replaces the replacement; deleteBlock /
@@ -26,35 +30,30 @@ export function checkOpAgainstActive(
   activeOps: readonly Op[],
   doc: RedraDoc,
 ): OpCheckResult {
-  const editedRoots = new Set<string>();
-  const deletedRoots = new Set<string>();
+  const blocked = new Set<string>();
+  const blockDescendants = (root: Element): void => {
+    const visit = (el: Element): void => {
+      const id = getElementId(doc, el);
+      if (id !== undefined) blocked.add(id);
+    };
+    if (isTemplate(root)) walkElements(root.content, visit);
+    walkElements(root, visit);
+  };
   for (const active of activeOps) {
-    if (active.type === 'editText') editedRoots.add(active.id);
-    else if (active.type === 'deleteBlock') deletedRoots.add(active.id);
+    if (active.type !== 'editText' && active.type !== 'deleteBlock') continue;
+    const root = getElementById(doc, active.id);
+    if (!root) continue; // journal ops were validated on push; defensive only
+    if (active.type === 'deleteBlock') blocked.add(active.id);
+    blockDescendants(root);
   }
-  if (editedRoots.size === 0 && deletedRoots.size === 0) return { ok: true };
+  if (blocked.size === 0) return { ok: true };
 
   const targets: string[] = [op.id];
   if (op.type === 'moveBlock' && op.beforeId !== null) targets.push(op.beforeId);
 
   for (const id of targets) {
-    if (deletedRoots.has(id)) {
-      return { ok: false, error: `"${id}" is inside an edited/deleted block ("${id}" was deleted)` };
-    }
-    const el = getElementById(doc, id);
-    if (!el) return { ok: false, error: `unknown element id "${id}"` }; // validateOp catches this first
-    // Walk UP the pristine ancestors: hitting any edited/deleted root means
-    // this element's subtree was already replaced or detached.
-    let node: unknown = el.parentNode;
-    while (node) {
-      const ancestorId = getElementId(doc, node as Element);
-      if (ancestorId !== undefined && (editedRoots.has(ancestorId) || deletedRoots.has(ancestorId))) {
-        return {
-          ok: false,
-          error: `"${id}" is inside an edited/deleted block (ancestor "${ancestorId}")`,
-        };
-      }
-      node = (node as { parentNode?: unknown }).parentNode ?? null;
+    if (blocked.has(id)) {
+      return { ok: false, error: `"${id}" is inside an edited/deleted block` };
     }
   }
   return { ok: true };
