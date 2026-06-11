@@ -210,6 +210,12 @@ function createWindow(readyAt: number): void {
   win.on('closed', () => {
     win = null;
     docView = null;
+    // Single-window v1: the document dies with its window. Otherwise a
+    // reopened (activate) window would show the start screen while Cmd+S
+    // still silently saved the stale document.
+    docManager.close();
+    setDocMenuEnabled(false);
+    setPreview(false);
   });
 
   if (process.env['ELECTRON_RENDERER_URL']) {
