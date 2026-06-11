@@ -155,12 +155,22 @@ export function createEditorController(
   // --- block hover + delete (A2) ----------------------------------------------
 
   /**
-   * A block whose rect is at least this fraction of the viewport height is
-   * treated as a page wrapper, not an editable unit: hovering it shows no
-   * wash and no pill. 0.9 instead of 1.0 so wrappers with small top/bottom
-   * page margins (padding'ed report bodies, slide frames) are still caught.
+   * A block is treated as a page wrapper (no wash, no pill on hover) only
+   * when its rect fills BOTH the viewport AND nearly the whole document:
+   * a long table is taller than the viewport too, but the document around
+   * it is much taller still — it keeps its hover UI. 0.9 instead of 1.0 so
+   * wrappers with small top/bottom page margins (padding'ed report bodies,
+   * slide frames) are still caught.
    */
   const FULL_PAGE_BLOCK_RATIO = 0.9;
+
+  function isPageWrapper(block: HTMLElement): boolean {
+    const height = block.getBoundingClientRect().height;
+    return (
+      height >= FULL_PAGE_BLOCK_RATIO * win.innerHeight &&
+      height >= FULL_PAGE_BLOCK_RATIO * doc.documentElement.scrollHeight
+    );
+  }
 
   function clearHover(): void {
     if (hoverBlock) {
@@ -253,11 +263,12 @@ export function createEditorController(
     ) {
       return;
     }
-    // Page-wrapper noise: a top-level wrapper that fills the viewport would
-    // highlight the whole page as one "block" — useless wash, useless pill.
-    // Suppress the hover UI for it (resolveBlock stays pure; nested content
-    // inside still resolves to its own block on its own mouseover).
-    if (block && block.getBoundingClientRect().height >= FULL_PAGE_BLOCK_RATIO * win.innerHeight) {
+    // Page-wrapper noise: a top-level wrapper that fills the viewport AND
+    // the document would highlight the whole page as one "block" — useless
+    // wash, useless pill. Suppress the hover UI for it (resolveBlock stays
+    // pure; nested content inside still resolves to its own block on its
+    // own mouseover).
+    if (block && isPageWrapper(block)) {
       block = null;
     }
     // The pill floats LEFT of the block, so the pointer crosses "no man's

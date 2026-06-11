@@ -168,7 +168,15 @@ export class DocumentManager {
 
     try {
       if (overwritesCurrent && this.backupEnabled && !cur.backupDone && this.backupWriter) {
-        await this.backupWriter(targetPath, cur.originalBytes);
+        try {
+          await this.backupWriter(targetPath, cur.originalBytes);
+        } catch (err) {
+          // The raw fs message alone ("EACCES: ...") would land in the
+          // save-error dialog with no hint that it was the BACKUP that
+          // failed, not the save itself — prefix it.
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new Error(`Не удалось создать резервную копию: ${msg}`);
+        }
         cur.backupDone = true;
       }
 

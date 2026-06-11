@@ -243,6 +243,11 @@ describe('hover for NESTED blocks: parent containers and page wrappers', () => {
       '</section>' +
       '<footer data-redra-id="rF" id="f">подвал</footer>' +
       '</div>';
+    // The whole document is as tall as the wrapper: a TRUE page wrapper.
+    Object.defineProperty(document.documentElement, 'scrollHeight', {
+      value: 800,
+      configurable: true,
+    });
     const wrapper = document.getElementById('w')!;
     wrapper.getBoundingClientRect = rect({
       left: 0,
@@ -250,7 +255,7 @@ describe('hover for NESTED blocks: parent containers and page wrappers', () => {
       top: 0,
       bottom: 800,
       width: 1024,
-      height: 800, // >= 0.9 * innerHeight (jsdom: 768) → page-wrapper noise
+      height: 800, // >= 0.9 * innerHeight (jsdom: 768) AND >= 0.9 * scrollHeight
     });
     document.getElementById('p')!.getBoundingClientRect = rect({
       left: 100,
@@ -268,6 +273,7 @@ describe('hover for NESTED blocks: parent containers and page wrappers', () => {
   afterEach(() => {
     controller.destroy();
     document.body.innerHTML = '';
+    delete (document.documentElement as unknown as Record<string, unknown>)['scrollHeight'];
   });
 
   it('keeps the nested block hovered while the pointer crosses its PARENT toward the pill', () => {
@@ -308,5 +314,60 @@ describe('hover for NESTED blocks: parent containers and page wrappers', () => {
     over(q, { clientX: 110, clientY: 60 }); // inside p's reach, but q is no ancestor
     expect(p.classList.contains('redra-hover')).toBe(false);
     expect(q.classList.contains('redra-hover')).toBe(true);
+  });
+});
+
+describe('tall legit blocks are NOT page wrappers', () => {
+  let bridge: ReturnType<typeof makeBridge>;
+  let controller: EditorController;
+
+  const over = (el: Element, init: MouseEventInit = {}): void => {
+    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, ...init }));
+  };
+
+  beforeEach(() => {
+    if (typeof window.requestAnimationFrame !== 'function') {
+      window.requestAnimationFrame = ((cb: FrameRequestCallback) =>
+        setTimeout(() => cb(0), 0)) as typeof window.requestAnimationFrame;
+    }
+    // A long table: taller than the viewport (1200 > 0.9*768), but the
+    // document is MUCH taller (3000) — the table is content, not a wrapper.
+    document.body.innerHTML =
+      '<table data-redra-id="rT" id="t"><tbody data-redra-id="rTB">' +
+      '<tr data-redra-id="rR1"><td data-redra-id="rD1">a</td></tr>' +
+      '<tr data-redra-id="rR2"><td data-redra-id="rD2">b</td></tr>' +
+      '</tbody></table>' +
+      '<p data-redra-id="rP" id="p">после таблицы</p>';
+    Object.defineProperty(document.documentElement, 'scrollHeight', {
+      value: 3000,
+      configurable: true,
+    });
+    document.getElementById('t')!.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        right: 1024,
+        top: 0,
+        bottom: 1200,
+        width: 1024,
+        height: 1200,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    bridge = makeBridge();
+    controller = createEditorController(window, bridge, normalizeEditedHtml);
+    controller.setEditing(true);
+  });
+
+  afterEach(() => {
+    controller.destroy();
+    document.body.innerHTML = '';
+    delete (document.documentElement as unknown as Record<string, unknown>)['scrollHeight'];
+  });
+
+  it('a viewport-filling table inside a longer page keeps its hover UI (pill stays usable)', () => {
+    const t = document.getElementById('t')!;
+    over(t, { clientX: 500, clientY: 400 });
+    expect(t.classList.contains('redra-hover')).toBe(true);
   });
 });

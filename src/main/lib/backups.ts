@@ -25,18 +25,16 @@ export class BackupStore {
 
   /**
    * Write the original bytes of `filePath` into the store (atomic), return
-   * the backup path. If that exact backup file already exists, it is kept
-   * as is (skip) — per-session "only the first save backs up" semantics are
-   * the caller's job (DocumentManager's backupDone flag).
+   * the backup path. An existing backup for the same path is OVERWRITTEN:
+   * each session's first overwrite-save refreshes the backup with THAT
+   * session's pre-edit bytes (same semantics the old `.bak` files had).
+   * Per-session "only the first save backs up" gating is the caller's job
+   * (DocumentManager's backupDone flag).
    */
   async backupFor(filePath: string, bytes: Buffer): Promise<string> {
     await fs.mkdir(this.dir, { recursive: true });
     const target = this.backupPathFor(filePath);
-    const exists = await fs
-      .stat(target)
-      .then(() => true)
-      .catch(() => false);
-    if (!exists) await writeAtomic(target, bytes);
+    await writeAtomic(target, bytes);
     return target;
   }
 
