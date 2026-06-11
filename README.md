@@ -1,111 +1,93 @@
 # Redra
 
-**Открой HTML. Кликни. Пиши.**
+**Open HTML. Click. Write.**
 
-Redra — визуальный редактор HTML-файлов для macOS. Откройте любой HTML-файл —
-он выглядит как в Chrome. Кликните в текст — и пишите. Перетащите блоки за
-ручку, удалите лишнее, нажмите ⌘S — тот же файл сохранён на диск. Или
-экспортируйте в PDF.
+Redra is a visual HTML file editor for macOS. Open any HTML file — it renders
+just like Chrome. Click into the text and write. Drag blocks by their handle,
+delete what you don't need, hit ⌘S — and the same file is saved back to disk.
+Or export it to PDF.
 
-![Документ в Redra](docs/assets/redra-doc.png)
+![A document in Redra](docs/assets/redra-doc.png)
 
-![Возможности Redra](docs/assets/features.png)
+![Redra features](docs/assets/features.png)
 
-## Как это устроено
+## How it works
 
-Правки живут поверх нетронутого исходника: при открытии файл разбирается
-parse5 в эталонное дерево, а каждое действие пользователя записывается в
-журнал операций. Живой DOM из окна никогда не сериализуется — при сохранении
-журнал применяется к эталонному дереву, и в файл попадает только то, что вы
-действительно поменяли. Сохранение без правок — байт-в-байт оригинал: ни
-фантомных диффов под git, ни «причёсанной» разметки.
+Your edits live on top of an untouched source: when a file is opened, parse5
+parses it into a reference tree, and every action you take is recorded in an
+operation journal. The live DOM in the window is never serialized — on save,
+the journal is applied to the reference tree, so the only thing that reaches
+the file is what you actually changed. Saving with no edits writes the
+original back byte for byte: no phantom git diffs, no "tidied up" markup.
 
-![Стартовый экран Redra](docs/assets/redra-start.png)
+![Redra start screen](docs/assets/redra-start.png)
 
-## Установка
+## Install
 
-1. Скачайте `Redra-<версия>-arm64.dmg` со страницы
-   [Releases](https://github.com/redraaya/Redra/releases) (только Apple Silicon).
-2. Откройте DMG и перетащите **Redra** в **Applications**.
-3. **Первый запуск**: приложение не подписано сертификатом Apple, поэтому
-   Gatekeeper заблокирует его с сообщением, что открыть не удалось. Это
-   ожидаемо, действуйте так:
-   1. Попробуйте открыть Redra (двойной клик) — появится предупреждение,
-      нажмите «Готово»/«ОК».
-   2. Откройте **Системные настройки → Конфиденциальность и безопасность**,
-      прокрутите вниз — там появится кнопка **«Открыть всё равно»** напротив
-      сообщения о Redra (кнопка возникает только после первой попытки
-      запуска).
-   3. Нажмите её и подтвердите открытие (понадобится пароль или Touch ID).
+1. Download `Redra-<version>-arm64.dmg` from the
+   [Releases](https://github.com/redraaya/Redra/releases) page (Apple Silicon
+   only).
+2. Open the DMG and drag **Redra** into **Applications**.
+3. **First launch**: the app is not signed with an Apple certificate, so
+   Gatekeeper blocks it with a message that it could not be opened. This is
+   expected — do the following:
+   1. Try to open Redra (double-click). A warning appears — click
+      **Done**/**OK**.
+   2. Open **System Settings → Privacy & Security** and scroll down: an
+      **"Open Anyway"** button appears next to the message about Redra (the
+      button only shows up after the first launch attempt).
+   3. Click it and confirm (you'll need your password or Touch ID).
 
-   Достаточно одного раза — дальше Redra открывается как обычно.
-   Альтернатива в терминале:
+   You only do this once — afterwards Redra opens normally.
+   Terminal alternative:
 
    ```sh
    xattr -cr /Applications/Redra.app
    ```
 
-После установки Redra появляется в Finder в меню «Открыть в программе…» для
-файлов `.html` и `.htm`.
+Once installed, Redra shows up in Finder's "Open With…" menu for `.html` and
+`.htm` files.
 
-## Горячие клавиши
+## Hotkeys
 
-| Сочетание | Действие |
+| Shortcut | Action |
 | --- | --- |
-| ⌘O | Открыть файл |
-| ⌘S | Сохранить |
-| ⇧⌘S | Сохранить как… |
-| ⌘E | Режим «Просмотр» (вкл/выкл редактирование) |
-| ⇧⌘E | Экспорт в PDF… |
-| ⌘Z | Отменить |
-| ⇧⌘Z | Повторить |
-| Esc | Отменить правку элемента (вернуть как было) или перетаскивание |
-| ⌘-клик по ссылке | Открыть ссылку в браузере |
+| ⌘O | Open a file |
+| ⌘S | Save |
+| ⇧⌘S | Save As… |
+| ⌘E | Preview mode (toggles editing on/off) |
+| ⇧⌘E | Export to PDF… |
+| ⌘Z | Undo |
+| ⇧⌘Z | Redo |
+| Esc | Revert the element being edited (back to how it was) or cancel a drag |
+| ⌘-click a link | Open the link in your browser |
 
-## Известные ограничения v1
+## Known v1 limitations
 
-- **iframe**: слой редактирования не достигает содержимого iframe — страница
-  внутри iframe живёт своей жизнью и не редактируется.
-- **`transform`/`filter` на `<html>`**: такие стили на корневом элементе
-  создают новый containing block для `position: fixed` — плашка-ручка блока
-  на подобных страницах может позиционироваться со смещением.
-- Одно окно — один документ; относительные ссылки на соседние `.html`
-  намеренно не работают до поддержки нескольких документов.
+- **iframes**: the editing layer does not reach into iframe content — a page
+  inside an iframe lives its own life and cannot be edited.
+- **`transform`/`filter` on `<html>`**: these styles on the root element
+  create a new containing block for `position: fixed`, so the block handle
+  pill may be positioned with an offset on such pages.
+- One window — one document; relative links to sibling `.html` files are
+  deliberately dead until multi-document support lands.
 
-## Сборка из исходников
+## Build from source
 
 ```sh
 npm install
-npm run dev        # запуск в режиме разработки
-npm test           # тесты движка и оболочки
-npm run smoke      # сборка + дымовой прогон настоящего окна
-npm run dist       # DMG для Apple Silicon в dist/
+npm run dev        # run in development mode
+npm test           # engine and shell tests
+npm run smoke      # build + smoke run of a real window
+npm run dist       # DMG for Apple Silicon in dist/
 ```
 
-## Лицензия
+## Updates
+
+Redra quietly checks GitHub releases once per launch. When a newer version is
+out, a small pill appears in the titlebar — click it to open the download
+page, or dismiss it and it won't come back for that version.
+
+## License
 
 [MIT](LICENSE)
-
----
-
-## English
-
-**Open HTML. Click. Write.** Redra is a visual HTML file editor for macOS
-(Apple Silicon). Open any HTML file — it renders like Chrome. Click into the
-text and type, drag blocks by their handle, hit ⌘S — the same file is written
-back to disk, or export to PDF.
-
-Edits live as an operation journal on top of an untouched parse5 source tree;
-the live DOM is never serialized. Saving with no edits writes the original
-bytes back verbatim — no phantom git diffs.
-
-Install: grab the DMG from
-[Releases](https://github.com/redraaya/Redra/releases), drag Redra to
-Applications. The app is not signed with an Apple certificate, so Gatekeeper
-blocks the first launch: try to open Redra once, dismiss the warning, then go
-to **System Settings → Privacy & Security**, scroll down and click
-**"Open Anyway"** next to the Redra message (the button only appears after the
-first launch attempt), and confirm. One time only — afterwards it opens
-normally. Terminal alternative: `xattr -cr /Applications/Redra.app`.
-
-License: [MIT](LICENSE).
