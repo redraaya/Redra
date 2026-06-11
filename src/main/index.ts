@@ -17,6 +17,7 @@ import { PerfLog } from './lib/perf.js';
 import { senderMatches } from './lib/sender.js';
 import { DEFAULT_SETTINGS } from './lib/settings.js';
 import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
+import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
 import { guardDocPush } from './lib/op-guard.js';
 import { createSaveFlow } from './save-flow.js';
@@ -67,12 +68,19 @@ let pendingOpenPath: string | null = cliFile ? path.resolve(cliFile) : null;
 let previewOn = false;
 /** Set on before-quit so a confirmed close can resume the aborted Cmd+Q. */
 let quitRequested = false;
+/**
+ * UI language: RU on Russian systems, EN otherwise (no override). The real
+ * locale is only known after 'ready' — onReady swaps in the right table
+ * before any menu or dialog is built.
+ */
+let t = makeT('en');
 
 // Save / export / close-guard flows live in save-flow.ts; index only wires.
 const saveFlow = createSaveFlow({
   docManager,
   perf,
   smoke: SMOKE,
+  t: (key) => t(key), // forwards to the locale-resolved table (set in onReady)
   getWin: () => win,
   getDocView: () => docView,
   commitActiveEdit,
@@ -106,6 +114,9 @@ async function onReady(): Promise<void> {
   const readyAt = performance.now();
   perf.record('app-start-to-ready', readyAt); // performance.now() origin = process start
 
+  // app.getLocale() is only meaningful after 'ready'.
+  t = makeT(pickLang(app.getLocale()));
+
   installRedraProtocolHandler((docId) => docManager.getServed(docId));
 
   recents = new RecentsStore(path.join(app.getPath('userData'), 'recents.json'));
@@ -136,7 +147,7 @@ async function onReady(): Promise<void> {
       toggleBackup: (checked) => void applySettings({ backupOnFirstSave: checked }),
       showBackups: () => void showBackupsFolder(),
     },
-    { backupChecked: settingsStore.get().backupOnFirstSave },
+    { backupChecked: settingsStore.get().backupOnFirstSave, t },
   );
   registerIpc();
   createWindow(readyAt);
@@ -482,7 +493,7 @@ async function openDocument(filePath: string): Promise<OpenResult> {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[open] failed:', message);
     if (SMOKE) app.exit(1);
-    else if (win) dialog.showErrorBox('Не удалось открыть файл', message);
+    else if (win) dialog.showErrorBox(t('error.openTitle'), message);
     return { ok: false, error: message };
   }
 }

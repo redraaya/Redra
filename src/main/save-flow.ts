@@ -5,12 +5,15 @@ import { writeAtomic } from './lib/atomic-write.js';
 import type { DocumentManager } from './document-manager.js';
 import type { PerfLog } from './lib/perf.js';
 import type { ExportResult, SaveResult } from '../shared/ipc.js';
+import type { Translate } from '../shared/i18n.js';
 
 export interface SaveFlowDeps {
   docManager: DocumentManager;
   perf: PerfLog;
   /** SMOKE flag: smoke runs are dialog-free and fail hard on save errors. */
   smoke: boolean;
+  /** Localized dialog strings (resolved in main after app ready). */
+  t: Translate;
   getWin(): BrowserWindow | null;
   getDocView(): WebContentsView | null;
   /** Flush the doc preload's in-flight edit session into the journal. */
@@ -47,8 +50,8 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
   ): Promise<'save' | 'discard' | 'cancel'> {
     const { response } = await dialog.showMessageBox(w, {
       type: 'warning',
-      message: `Сохранить изменения в «${name}»?`,
-      buttons: ['Сохранить', 'Не сохранять', 'Отмена'],
+      message: deps.t('dialog.unsaved.message').replace('{name}', name),
+      buttons: [deps.t('dialog.unsaved.save'), deps.t('dialog.unsaved.discard'), deps.t('dialog.cancel')],
       defaultId: 0,
       cancelId: 2,
     });
@@ -91,7 +94,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     // except the save the close flow itself requested.
     if (closeFlowActive && !opts?.fromCloseFlow) return { ok: false, canceled: true };
     const cur = docManager.currentDoc;
-    if (!cur) return { ok: false, error: 'Документ не открыт' };
+    if (!cur) return { ok: false, error: deps.t('error.noDocument') };
 
     // An active edit session must land in the journal before serialization.
     await deps.commitActiveEdit();
@@ -124,9 +127,9 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
       }
       const { response } = await dialog.showMessageBox(w, {
         type: 'warning',
-        message: 'Файл на диске изменён другой программой',
-        detail: 'Перезаписать его версией из Redra? Внешние изменения будут потеряны.',
-        buttons: ['Перезаписать', 'Отмена'],
+        message: deps.t('dialog.conflict.message'),
+        detail: deps.t('dialog.conflict.detail'),
+        buttons: [deps.t('dialog.conflict.overwrite'), deps.t('dialog.cancel')],
         defaultId: 0,
         cancelId: 1,
       });
@@ -135,8 +138,8 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
       saved = await docManager.save(asPath);
     }
     if (!saved.ok && saved.conflict) {
-      // 3 conflicts in a row — surface a real message, not «неизвестная ошибка».
-      saved = { ok: false, error: 'Файл на диске продолжает меняться — сохранение прервано' };
+      // 3 conflicts in a row — surface a real message, not «unknown error».
+      saved = { ok: false, error: deps.t('error.keepsChanging') };
     }
 
     if (saved.ok) {
@@ -150,10 +153,10 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
       }
     } else if (!saved.canceled) {
       // Generic failure (apply/serialize/write) — must never be silent.
-      const message = saved.error ?? 'неизвестная ошибка';
+      const message = saved.error ?? deps.t('error.unknown');
       console.error('[save] failed:', message);
       if (deps.smoke) app.exit(1);
-      else dialog.showErrorBox('Не удалось сохранить', message);
+      else dialog.showErrorBox(deps.t('error.saveTitle'), message);
     }
     return saved;
   }
@@ -165,7 +168,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
   async function exportPdf(): Promise<ExportResult> {
     const cur = docManager.currentDoc;
     if (!cur || !deps.getDocView() || !deps.getWin()) {
-      return { ok: false, error: 'Документ не открыт' };
+      return { ok: false, error: deps.t('error.noDocument') };
     }
 
     await deps.commitActiveEdit();
@@ -199,7 +202,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[pdf] export failed:', message);
-      dialog.showErrorBox('Не удалось экспортировать PDF', message);
+      dialog.showErrorBox(deps.t('error.pdfTitle'), message);
       return { ok: false, error: message };
     }
   }

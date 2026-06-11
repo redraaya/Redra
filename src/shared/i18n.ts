@@ -1,0 +1,110 @@
+/**
+ * Tiny two-language string table: Russian when the system locale is Russian,
+ * English otherwise. Auto only — no setting, no override.
+ *
+ * Consumers pick the language once at startup:
+ *   main process     → app.getLocale()        (after 'ready')
+ *   shell renderer   → navigator.language
+ *   doc preload      → navigator.language     (isolated world, same value)
+ *
+ * Keys are typed, so a missing key is a compile error; at runtime an unknown
+ * key falls back to the key itself rather than throwing.
+ */
+
+export type Lang = 'ru' | 'en';
+
+/** ru / ru-RU / ru_RU → 'ru'; everything else (incl. uk, be) → 'en'. */
+export function pickLang(locale: string): Lang {
+  return /^ru(?:[-_]|$)/i.test(locale) ? 'ru' : 'en';
+}
+
+const STRINGS = {
+  // --- application menu -----------------------------------------------------
+  'menu.about': { ru: 'О программе Redra', en: 'About Redra' },
+  'menu.services': { ru: 'Службы', en: 'Services' },
+  'menu.hide': { ru: 'Скрыть Redra', en: 'Hide Redra' },
+  'menu.hideOthers': { ru: 'Скрыть остальные', en: 'Hide Others' },
+  'menu.unhide': { ru: 'Показать все', en: 'Show All' },
+  'menu.quitMac': { ru: 'Завершить Redra', en: 'Quit Redra' },
+  'menu.quit': { ru: 'Выход', en: 'Exit' },
+  'menu.file': { ru: 'Файл', en: 'File' },
+  'menu.open': { ru: 'Открыть…', en: 'Open…' },
+  'menu.save': { ru: 'Сохранить', en: 'Save' },
+  'menu.saveAs': { ru: 'Сохранить как…', en: 'Save As…' },
+  'menu.exportPdf': { ru: 'Экспорт в PDF…', en: 'Export to PDF…' },
+  'menu.backup': { ru: 'Создавать резервную копию', en: 'Keep a backup of the original' },
+  'menu.showBackups': { ru: 'Показать резервные копии', en: 'Show backups' },
+  'menu.edit': { ru: 'Правка', en: 'Edit' },
+  'menu.undo': { ru: 'Отменить', en: 'Undo' },
+  'menu.redo': { ru: 'Повторить', en: 'Redo' },
+  'menu.cut': { ru: 'Вырезать', en: 'Cut' },
+  'menu.copy': { ru: 'Скопировать', en: 'Copy' },
+  'menu.paste': { ru: 'Вставить', en: 'Paste' },
+  'menu.selectAll': { ru: 'Выделить всё', en: 'Select All' },
+  'menu.view': { ru: 'Вид', en: 'View' },
+  'menu.preview': { ru: 'Просмотр', en: 'Preview' },
+  'menu.window': { ru: 'Окно', en: 'Window' },
+
+  // --- main-process dialogs ---------------------------------------------------
+  'dialog.unsaved.message': {
+    ru: 'Сохранить изменения в «{name}»?',
+    en: 'Save changes to “{name}”?',
+  },
+  'dialog.unsaved.save': { ru: 'Сохранить', en: 'Save' },
+  'dialog.unsaved.discard': { ru: 'Не сохранять', en: 'Don’t Save' },
+  'dialog.cancel': { ru: 'Отмена', en: 'Cancel' },
+  'dialog.conflict.message': {
+    ru: 'Файл на диске изменён другой программой',
+    en: 'The file on disk was changed by another app',
+  },
+  'dialog.conflict.detail': {
+    ru: 'Перезаписать его версией из Redra? Внешние изменения будут потеряны.',
+    en: 'Overwrite it with the version from Redra? The external changes will be lost.',
+  },
+  'dialog.conflict.overwrite': { ru: 'Перезаписать', en: 'Overwrite' },
+  'error.noDocument': { ru: 'Документ не открыт', en: 'No document is open' },
+  'error.keepsChanging': {
+    ru: 'Файл на диске продолжает меняться — сохранение прервано',
+    en: 'The file on disk keeps changing — save aborted',
+  },
+  'error.unknown': { ru: 'неизвестная ошибка', en: 'unknown error' },
+  'error.saveTitle': { ru: 'Не удалось сохранить', en: 'Can’t save' },
+  'error.pdfTitle': { ru: 'Не удалось экспортировать PDF', en: 'Can’t export PDF' },
+  'error.openTitle': { ru: 'Не удалось открыть файл', en: 'Can’t open file' },
+
+  // --- shell renderer (start screen + titlebar) -------------------------------
+  'shell.tagline': {
+    ru: 'Откройте HTML-файл. Кликните в текст. Пишите.',
+    en: 'Open an HTML file. Click into the text. Write.',
+  },
+  'shell.dropPrefix': { ru: 'Перетащите файл сюда — или ', en: 'Drop a file here — or ' },
+  'shell.recent': { ru: 'Недавние', en: 'Recent' },
+  'shell.modePreview': { ru: 'Просмотр', en: 'Preview' },
+  'shell.previewTooltip': { ru: 'Просмотр (⌘E)', en: 'Preview (⌘E)' },
+  'shell.pdfTooltip': { ru: 'Экспорт в PDF… (⇧⌘E)', en: 'Export to PDF… (⇧⌘E)' },
+  'shell.saveTooltip': { ru: 'Сохранить (⌘S)', en: 'Save (⌘S)' },
+  'shell.dirtyTooltip': { ru: 'Есть несохранённые изменения', en: 'Unsaved changes' },
+  'shell.themeSystem': { ru: 'Тема: системная', en: 'Theme: system' },
+  'shell.themeLight': { ru: 'Тема: светлая', en: 'Theme: light' },
+  'shell.themeDark': { ru: 'Тема: тёмная', en: 'Theme: dark' },
+  'shell.updateAvailable': { ru: 'Доступна v{version}', en: 'v{version} available' },
+  'shell.updateTooltip': {
+    ru: 'Вышла новая версия — открыть страницу загрузки',
+    en: 'A new version is out — open the download page',
+  },
+  'shell.updateHide': { ru: 'Скрыть', en: 'Hide' },
+
+  // --- doc editing overlay -----------------------------------------------------
+  'overlay.drag': { ru: 'Перетащить блок', en: 'Drag block' },
+  'overlay.delete': { ru: 'Удалить блок', en: 'Delete block' },
+} as const satisfies Record<string, { ru: string; en: string }>;
+
+export type StringKey = keyof typeof STRINGS;
+export type Translate = (key: StringKey) => string;
+
+export function makeT(lang: Lang): Translate {
+  return (key) => {
+    const entry = (STRINGS as Record<string, { ru: string; en: string } | undefined>)[key];
+    return entry ? entry[lang] : key; // untyped callers degrade to the key, never throw
+  };
+}

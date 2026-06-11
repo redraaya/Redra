@@ -1,4 +1,5 @@
 import { REDRA_ID_ATTR } from '../../engine/types.js';
+import { makeT, pickLang } from '../../shared/i18n.js';
 
 /**
  * Floating editor chrome: the block handle pill (⋮⋮ grip + trash), the drag
@@ -107,6 +108,9 @@ export class Overlay {
   private block: HTMLElement | null = null;
 
   constructor(doc: Document, callbacks: OverlayCallbacks) {
+    // The isolated world shares navigator.language with the page — both come
+    // from the system locale, which is exactly the auto-language contract.
+    const t = makeT(pickLang(navigator.language));
     this.doc = doc;
     this.host = doc.createElement('div');
     // The host is zero-size and inert; everything visible is inside the
@@ -133,14 +137,14 @@ export class Overlay {
     const grip = doc.createElement('span');
     grip.className = 'grip';
     grip.textContent = '⋮⋮';
-    grip.setAttribute('title', 'Перетащить блок');
+    grip.setAttribute('title', t('overlay.drag'));
     grip.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       callbacks.onGripDown(e);
     });
     const trash = doc.createElement('button');
     trash.className = 'trash';
-    trash.setAttribute('title', 'Удалить блок');
+    trash.setAttribute('title', t('overlay.delete'));
     trash.innerHTML = TRASH_SVG;
     trash.addEventListener('click', () => callbacks.onDelete());
     this.handle.append(grip, trash);

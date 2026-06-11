@@ -43,4 +43,38 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime(NOW - 7 * DAY, NOW)).toBe('04.06.2026');
     expect(formatRelativeTime(new Date(2025, 0, 3, 9, 30).getTime(), NOW)).toBe('03.01.2025');
   });
+
+  it('defaults to Russian when lang is omitted', () => {
+    expect(formatRelativeTime(NOW - MIN, NOW)).toBe('1 мин назад');
+  });
+
+  describe('English branch', () => {
+    it('"just now" under a minute (incl. clock skew)', () => {
+      expect(formatRelativeTime(NOW, NOW, 'en')).toBe('just now');
+      expect(formatRelativeTime(NOW + 5 * MIN, NOW, 'en')).toBe('just now');
+    });
+
+    it('"N min ago" under an hour', () => {
+      expect(formatRelativeTime(NOW - MIN, NOW, 'en')).toBe('1 min ago');
+      expect(formatRelativeTime(NOW - 59 * MIN - 59_000, NOW, 'en')).toBe('59 min ago');
+    });
+
+    it('"N h ago" under a day', () => {
+      expect(formatRelativeTime(NOW - HOUR, NOW, 'en')).toBe('1 h ago');
+      expect(formatRelativeTime(NOW - 23 * HOUR, NOW, 'en')).toBe('23 h ago');
+    });
+
+    it('"yesterday" between one and two days', () => {
+      expect(formatRelativeTime(NOW - DAY, NOW, 'en')).toBe('yesterday');
+    });
+
+    it('"N d ago" under a week', () => {
+      expect(formatRelativeTime(NOW - 2 * DAY, NOW, 'en')).toBe('2 d ago');
+      expect(formatRelativeTime(NOW - 6 * DAY, NOW, 'en')).toBe('6 d ago');
+    });
+
+    it('numeric date fallback is the same in both languages', () => {
+      expect(formatRelativeTime(NOW - 7 * DAY, NOW, 'en')).toBe('04.06.2026');
+    });
+  });
 });

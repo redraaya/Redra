@@ -1,4 +1,5 @@
 import type { RecentEntry, RedraShellApi, Settings } from '../shared/ipc';
+import { makeT, pickLang } from '../shared/i18n';
 import { formatRelativeTime } from '../shared/relative-time';
 import './style.css';
 
@@ -31,13 +32,42 @@ const btnTheme = $('btn-theme') as HTMLButtonElement;
 const recentBlock = $('recent-block');
 const recentsEl = $('recents');
 
+// --- language -----------------------------------------------------------------
+
+// Electron derives navigator.language from the system locale: RU system → RU
+// shell, anything else → EN. index.html ships Russian defaults; non-RU locales
+// are re-labeled here, synchronously, before first paint.
+const lang = pickLang(navigator.language);
+const t = makeT(lang);
+
+modePill.textContent = t('shell.modePreview');
+btnPreview.title = t('shell.previewTooltip');
+btnPdf.title = t('shell.pdfTooltip');
+btnSave.title = t('shell.saveTooltip');
+dirtyDot.title = t('shell.dirtyTooltip');
+updatePill.title = t('shell.updateTooltip');
+updateClose.title = t('shell.updateHide');
+updateClose.setAttribute('aria-label', t('shell.updateHide'));
+{
+  const tagline = document.querySelector('.tagline');
+  if (tagline) tagline.textContent = t('shell.tagline');
+  const recentLabel = document.querySelector('.recent-label');
+  if (recentLabel) recentLabel.textContent = t('shell.recent');
+  const dropPill = document.getElementById('drop-pill');
+  if (dropPill) {
+    const hotkey = document.createElement('b');
+    hotkey.textContent = '⌘O';
+    dropPill.replaceChildren(t('shell.dropPrefix'), hotkey);
+  }
+}
+
 // --- theme ------------------------------------------------------------------
 
 const THEME_ORDER: Settings['shellTheme'][] = ['system', 'light', 'dark'];
 const THEME_LABEL: Record<Settings['shellTheme'], string> = {
-  system: 'Тема: системная',
-  light: 'Тема: светлая',
-  dark: 'Тема: тёмная',
+  system: t('shell.themeSystem'),
+  light: t('shell.themeLight'),
+  dark: t('shell.themeDark'),
 };
 let shellTheme: Settings['shellTheme'] = 'system';
 
@@ -98,7 +128,7 @@ let updateInfo: { version: string; url: string } | null = null;
 
 redra.onUpdateAvailable((info) => {
   updateInfo = info;
-  updateText.textContent = `Доступна v${info.version}`;
+  updateText.textContent = t('shell.updateAvailable').replace('{version}', info.version);
   updatePill.hidden = false;
 });
 
@@ -165,7 +195,7 @@ function recentRow(entry: RecentEntry, now: number): HTMLElement {
   if (entry.openedAt !== undefined) {
     const when = document.createElement('div');
     when.className = 'when';
-    when.textContent = formatRelativeTime(entry.openedAt, now);
+    when.textContent = formatRelativeTime(entry.openedAt, now, lang);
     row.append(when);
   }
 

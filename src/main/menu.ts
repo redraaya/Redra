@@ -1,5 +1,6 @@
 import { Menu } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
+import type { Translate } from '../shared/i18n.js';
 
 export interface MenuHandlers {
   open(): void;
@@ -10,17 +11,19 @@ export interface MenuHandlers {
   undo(): void;
   /** Cmd+Shift+Z. */
   redo(): void;
-  /** «Просмотр» checkbox, Cmd+E. Receives the NEW checked state. */
+  /** Preview checkbox, Cmd+E. Receives the NEW checked state. */
   togglePreview(checked: boolean): void;
-  /** «Создавать резервную копию» checkbox. Receives the NEW checked state. */
+  /** Backup checkbox. Receives the NEW checked state. */
   toggleBackup(checked: boolean): void;
-  /** «Показать резервные копии» — opens the central backups folder. */
+  /** «Show backups» — opens the central backups folder. */
   showBackups(): void;
 }
 
 export interface MenuOptions {
   /** Initial state of the .bak checkbox (from settings). */
   backupChecked: boolean;
+  /** Localized labels (RU when the system is Russian, EN otherwise). */
+  t: Translate;
 }
 
 /** Menu items that only make sense with a document open (start disabled). */
@@ -28,48 +31,49 @@ const DOC_ITEM_IDS = ['file-save', 'file-save-as', 'file-export-pdf', 'view-prev
 
 export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void {
   const isMac = process.platform === 'darwin';
+  const { t } = options;
   const template: MenuItemConstructorOptions[] = [];
 
   if (isMac) {
     // Explicit app menu instead of role: 'appMenu' — the rest of the menu is
-    // Russian, so the standard items get Russian labels too. «О программе»
-    // is the stock about panel: name, icon and version from Info.plist.
+    // localized by our own table, so the standard items get matching labels
+    // too. «About» is the stock panel: name, icon, version from Info.plist.
     template.push({
       label: 'Redra',
       submenu: [
-        { role: 'about', label: 'О программе Redra' },
+        { role: 'about', label: t('menu.about') },
         { type: 'separator' },
-        { role: 'services', label: 'Службы' },
+        { role: 'services', label: t('menu.services') },
         { type: 'separator' },
-        { role: 'hide', label: 'Скрыть Redra' },
-        { role: 'hideOthers', label: 'Скрыть остальные' },
-        { role: 'unhide', label: 'Показать все' },
+        { role: 'hide', label: t('menu.hide') },
+        { role: 'hideOthers', label: t('menu.hideOthers') },
+        { role: 'unhide', label: t('menu.unhide') },
         { type: 'separator' },
-        { role: 'quit', label: 'Завершить Redra' },
+        { role: 'quit', label: t('menu.quitMac') },
       ],
     });
   }
 
   const fileSubmenu: MenuItemConstructorOptions[] = [
-    { label: 'Открыть…', accelerator: 'CmdOrCtrl+O', click: () => handlers.open() },
+    { label: t('menu.open'), accelerator: 'CmdOrCtrl+O', click: () => handlers.open() },
     { type: 'separator' },
     {
       id: 'file-save',
-      label: 'Сохранить',
+      label: t('menu.save'),
       accelerator: 'CmdOrCtrl+S',
       enabled: false,
       click: () => handlers.save(),
     },
     {
       id: 'file-save-as',
-      label: 'Сохранить как…',
+      label: t('menu.saveAs'),
       accelerator: 'CmdOrCtrl+Shift+S',
       enabled: false,
       click: () => handlers.saveAs(),
     },
     {
       id: 'file-export-pdf',
-      label: 'Экспорт в PDF…',
+      label: t('menu.exportPdf'),
       accelerator: 'CmdOrCtrl+Shift+E',
       enabled: false,
       click: () => handlers.exportPdf(),
@@ -77,44 +81,44 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
     { type: 'separator' },
     {
       id: 'file-backup',
-      label: 'Создавать резервную копию',
+      label: t('menu.backup'),
       type: 'checkbox',
       checked: options.backupChecked,
       click: (item) => handlers.toggleBackup(item.checked),
     },
     {
       id: 'file-show-backups',
-      label: 'Показать резервные копии',
+      label: t('menu.showBackups'),
       // Always enabled: the folder is per-app, not per-document.
       click: () => handlers.showBackups(),
     },
   ];
   if (!isMac) {
-    fileSubmenu.push({ type: 'separator' }, { role: 'quit', label: 'Выход' });
+    fileSubmenu.push({ type: 'separator' }, { role: 'quit', label: t('menu.quit') });
   }
-  template.push({ label: 'Файл', submenu: fileSubmenu });
+  template.push({ label: t('menu.file'), submenu: fileSubmenu });
 
   // Undo/Redo are OURS (journal + local DOM inverse stack in the doc preload);
   // clipboard/selection stay native roles so they keep working everywhere.
   template.push({
-    label: 'Правка',
+    label: t('menu.edit'),
     submenu: [
-      { label: 'Отменить', accelerator: 'CmdOrCtrl+Z', click: () => handlers.undo() },
-      { label: 'Повторить', accelerator: 'CmdOrCtrl+Shift+Z', click: () => handlers.redo() },
+      { label: t('menu.undo'), accelerator: 'CmdOrCtrl+Z', click: () => handlers.undo() },
+      { label: t('menu.redo'), accelerator: 'CmdOrCtrl+Shift+Z', click: () => handlers.redo() },
       { type: 'separator' },
-      { role: 'cut', label: 'Вырезать' },
-      { role: 'copy', label: 'Скопировать' },
-      { role: 'paste', label: 'Вставить' },
-      { role: 'selectAll', label: 'Выделить всё' },
+      { role: 'cut', label: t('menu.cut') },
+      { role: 'copy', label: t('menu.copy') },
+      { role: 'paste', label: t('menu.paste') },
+      { role: 'selectAll', label: t('menu.selectAll') },
     ],
   });
 
   template.push({
-    label: 'Вид',
+    label: t('menu.view'),
     submenu: [
       {
         id: 'view-preview',
-        label: 'Просмотр',
+        label: t('menu.preview'),
         type: 'checkbox',
         checked: false,
         enabled: false,
@@ -124,7 +128,7 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
     ],
   });
 
-  template.push({ label: 'Окно', role: 'windowMenu' });
+  template.push({ label: t('menu.window'), role: 'windowMenu' });
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
