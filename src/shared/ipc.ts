@@ -74,7 +74,7 @@ export type OpUndoResult = { ok: boolean; dirty: boolean };
  * free of engine imports.
  */
 export interface RedraDocBridge {
-  pushOp(op: { type: string; id: string }): Promise<OpPushResult>;
+  pushOp(op: { type: string; id: string; [extra: string]: unknown }): Promise<OpPushResult>;
   undo(): Promise<OpUndoResult>;
   redo(): Promise<OpUndoResult>;
   openExternal(url: string): void;
