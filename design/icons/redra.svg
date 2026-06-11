@@ -1,0 +1,14 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Redra app icon — concept Б («r + каретка»), approved in Stage 0.
+       macOS Big Sur-style squircle approximated by a rounded rect (r≈232),
+       background #D9482B, white geometric lowercase «r» + caret bar. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="#D9482B"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="62" stroke-linecap="round">
+    <!-- stem: baseline 672, x-height top 372 -->
+    <path d="M 388 403 L 388 641"/>
+    <!-- shoulder: branches from the stem, quarter-arc to the upper right -->
+    <path d="M 388 500 A 128 128 0 0 1 516 372"/>
+  </g>
+  <!-- caret bar, blinking white in the mockup; gap ≈ 69 from the r -->
+  <rect x="616" y="345" width="50" height="354" rx="25" fill="#FFFFFF"/>
+</svg>
