@@ -26,8 +26,17 @@ parse5 в эталонное дерево, а каждое действие по
    [Releases](https://github.com/redraaya/Redra/releases) (только Apple Silicon).
 2. Откройте DMG и перетащите **Redra** в **Applications**.
 3. **Первый запуск**: приложение не подписано сертификатом Apple, поэтому
-   Gatekeeper его заблокирует. Кликните по Redra.app **правой кнопкой →
-   «Открыть» → «Открыть»** (один раз; дальше открывается как обычно).
+   Gatekeeper заблокирует его с сообщением, что открыть не удалось. Это
+   ожидаемо, действуйте так:
+   1. Попробуйте открыть Redra (двойной клик) — появится предупреждение,
+      нажмите «Готово»/«ОК».
+   2. Откройте **Системные настройки → Конфиденциальность и безопасность**,
+      прокрутите вниз — там появится кнопка **«Открыть всё равно»** напротив
+      сообщения о Redra (кнопка возникает только после первой попытки
+      запуска).
+   3. Нажмите её и подтвердите открытие (понадобится пароль или Touch ID).
+
+   Достаточно одного раза — дальше Redra открывается как обычно.
    Альтернатива в терминале:
 
    ```sh
@@ -90,7 +99,11 @@ bytes back verbatim — no phantom git diffs.
 
 Install: grab the DMG from
 [Releases](https://github.com/redraaya/Redra/releases), drag Redra to
-Applications. The app is not signed with an Apple certificate — on first
-launch right-click → **Open** (or `xattr -cr /Applications/Redra.app`).
+Applications. The app is not signed with an Apple certificate, so Gatekeeper
+blocks the first launch: try to open Redra once, dismiss the warning, then go
+to **System Settings → Privacy & Security**, scroll down and click
+**"Open Anyway"** next to the Redra message (the button only appears after the
+first launch attempt), and confirm. One time only — afterwards it opens
+normally. Terminal alternative: `xattr -cr /Applications/Redra.app`.
 
 License: [MIT](LICENSE).

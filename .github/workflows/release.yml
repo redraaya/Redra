@@ -13,6 +13,7 @@ jobs:
   release:
     # macos-14 — раннер на Apple Silicon: DMG собирается на целевой архитектуре.
     runs-on: macos-14
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -21,11 +22,18 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Тег релиза обязан совпадать с версией в package.json — иначе DMG
+      # с «чужой» версией уедет в релиз под неверным тегом.
+      - name: Verify tag matches package.json version
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+
       - run: npm ci
 
       - run: npm test
 
       - run: npm run typecheck
+
+      - run: npm run smoke
 
       - name: Build DMG (unsigned)
         run: npm run dist
