@@ -1,6 +1,7 @@
 #!/bin/bash
 # Generate build/icon.icns (+ build/icon-512.png for the dev dock icon)
-# from design/icons/redra.svg. macOS-only: uses qlmanage + sips + iconutil.
+# from design/icons/redra.svg. macOS-only: Electron (offscreen, keeps the
+# alpha channel) + sips + iconutil.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,10 +13,16 @@ trap 'rm -rf "$TMP"' EXIT
 [ -f "$SVG" ] || { echo "error: $SVG not found" >&2; exit 1; }
 mkdir -p "$BUILD"
 
-# 1) Rasterize the SVG to a 1024px master (qlmanage keeps the alpha channel).
-qlmanage -t -s 1024 -o "$TMP" "$SVG" >/dev/null
-MASTER="$TMP/$(basename "$SVG").png"
-[ -f "$MASTER" ] || { echo "error: qlmanage produced no thumbnail" >&2; exit 1; }
+# 1) Rasterize the SVG to a 1024px master. Electron's offscreen renderer
+#    keeps the transparent canvas margins (Big Sur grid); qlmanage flattens
+#    SVG onto a white background, so it cannot be used here.
+ELECTRON="$ROOT/node_modules/.bin/electron"
+[ -x "$ELECTRON" ] || { echo "error: $ELECTRON not found (npm install first)" >&2; exit 1; }
+MASTER="$TMP/master.png"
+"$ELECTRON" "$ROOT/scripts/rasterize-icon.cjs" "$SVG" "$MASTER"
+[ -f "$MASTER" ] || { echo "error: rasterizer produced no png" >&2; exit 1; }
+# Retina sessions capture at 2x — normalize to the 1024 master.
+sips -z 1024 1024 "$MASTER" >/dev/null
 
 # 2) Build the iconset (16…512 + @2x; 1024 master is the 512@2x).
 ICONSET="$TMP/redra.iconset"
