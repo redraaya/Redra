@@ -31,7 +31,23 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
   const template: MenuItemConstructorOptions[] = [];
 
   if (isMac) {
-    template.push({ role: 'appMenu' });
+    // Explicit app menu instead of role: 'appMenu' — the rest of the menu is
+    // Russian, so the standard items get Russian labels too. «О программе»
+    // is the stock about panel: name, icon and version from Info.plist.
+    template.push({
+      label: 'Redra',
+      submenu: [
+        { role: 'about', label: 'О программе Redra' },
+        { type: 'separator' },
+        { role: 'services', label: 'Службы' },
+        { type: 'separator' },
+        { role: 'hide', label: 'Скрыть Redra' },
+        { role: 'hideOthers', label: 'Скрыть остальные' },
+        { role: 'unhide', label: 'Показать все' },
+        { type: 'separator' },
+        { role: 'quit', label: 'Завершить Redra' },
+      ],
+    });
   }
 
   const fileSubmenu: MenuItemConstructorOptions[] = [
