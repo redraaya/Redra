@@ -64,6 +64,21 @@ describe('LocalHistory — DOM inverse stack', () => {
     expect(ids()).toBe('r4,r5,r3');
   });
 
+  it('undoAndDiscard reverts the DOM and removes the entry entirely (no redo)', () => {
+    document.body.innerHTML = '<p data-redra-id="r3">x</p>';
+    const p = document.querySelector('p') as HTMLElement;
+    history.push({ kind: 'editText', el: p, prevHtml: 'x', newHtml: 'y' });
+    p.innerHTML = 'y';
+
+    history.undoAndDiscard();
+    expect(p.innerHTML).toBe('x');
+    expect(history.canUndo).toBe(false);
+    expect(history.canRedo).toBe(false); // dropped, not undone — must not be redoable
+
+    history.undoAndDiscard(); // empty stack: a no-op, never throws
+    expect(history.canUndo).toBe(false);
+  });
+
   it('a push after undo discards the redo tail (linear history)', () => {
     document.body.innerHTML = '<p data-redra-id="r3">x</p>';
     const p = document.querySelector('p') as HTMLElement;

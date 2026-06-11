@@ -84,6 +84,7 @@ export function startDrag(block: HTMLElement, start: PointerEvent, deps: DragDep
   const finish = (drop: boolean): void => {
     win.removeEventListener('pointermove', onMove, true);
     win.removeEventListener('pointerup', onUp, true);
+    win.removeEventListener('pointercancel', onCancel, true);
     win.removeEventListener('keydown', onKey, true);
     doc.documentElement.classList.remove('redra-dragging');
     overlay.hideGhost();
@@ -104,6 +105,9 @@ export function startDrag(block: HTMLElement, start: PointerEvent, deps: DragDep
   };
 
   const onUp = (): void => finish(true);
+  // The browser can abort a pointer stream (window loses focus, gesture
+  // takeover, pointer disconnect) — treat it exactly like Escape: cancel.
+  const onCancel = (): void => finish(false);
   const onKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape') return;
     e.preventDefault();
@@ -113,6 +117,7 @@ export function startDrag(block: HTMLElement, start: PointerEvent, deps: DragDep
 
   win.addEventListener('pointermove', onMove, true);
   win.addEventListener('pointerup', onUp, true);
+  win.addEventListener('pointercancel', onCancel, true);
   win.addEventListener('keydown', onKey, true);
 }
 
