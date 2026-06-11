@@ -6,7 +6,7 @@ import { resolveBlock } from './blocks.js';
 import { beginSession, commitSession, revertSession } from './session.js';
 import type { EditSessionState, Normalize } from './session.js';
 import { LocalHistory } from './history.js';
-import { Overlay } from './overlay.js';
+import { HANDLE_REACH, Overlay } from './overlay.js';
 import { startDrag } from './drag.js';
 
 /**
@@ -230,7 +230,26 @@ export function createEditorController(
     const target = asElement(e.target);
     if (!target) return;
     if (overlay.containsTarget(target)) return; // hovering the pill keeps it alive
-    setHover(resolveBlock(target, win));
+    const block = resolveBlock(target, win);
+    // The pill floats LEFT of the block, so the pointer crosses "no man's
+    // land" on its way there — mouseover fires on the page background where
+    // no block resolves, and without this guard the pill vanishes before it
+    // can be clicked. Keep the current block while the pointer stays inside
+    // its rect extended to cover the pill (plus diagonal slack).
+    if (!block && hoverBlock && withinHandleReach(e)) return;
+    setHover(block);
+  }
+
+  function withinHandleReach(e: MouseEvent): boolean {
+    if (!hoverBlock) return false;
+    const r = hoverBlock.getBoundingClientRect();
+    const slack = 8;
+    return (
+      e.clientX >= r.left - HANDLE_REACH - slack &&
+      e.clientX <= r.right + slack &&
+      e.clientY >= r.top - slack &&
+      e.clientY <= r.bottom + slack
+    );
   }
 
   function onMouseOut(e: MouseEvent): void {
