@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_RECENTS, addRecent, sanitizeRecents } from '../../src/main/lib/recents.js';
+import { MAX_RECENTS, addRecent, sanitizeRecents, sanitizeTimes } from '../../src/main/lib/recents.js';
 
 describe('addRecent', () => {
   it('prepends new entries (most-recent-first)', () => {
@@ -31,5 +31,18 @@ describe('sanitizeRecents', () => {
   it('caps oversized stored lists', () => {
     const big = Array.from({ length: 30 }, (_, i) => `/f${i}`);
     expect(sanitizeRecents(big)).toHaveLength(MAX_RECENTS);
+  });
+});
+
+describe('sanitizeTimes', () => {
+  it('returns {} for non-objects', () => {
+    expect(sanitizeTimes(null, ['/a'])).toEqual({});
+    expect(sanitizeTimes([1], ['/a'])).toEqual({});
+    expect(sanitizeTimes('x', ['/a'])).toEqual({});
+  });
+
+  it('keeps only finite positive timestamps for paths still in the list', () => {
+    const raw = { '/a': 100, '/gone': 200, '/b': 'soon', '/c': NaN, '/d': -5 };
+    expect(sanitizeTimes(raw, ['/a', '/b', '/c', '/d'])).toEqual({ '/a': 100 });
   });
 });

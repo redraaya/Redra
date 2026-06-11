@@ -1,108 +1,289 @@
-/* Placeholder shell — warm-paper palette only; real design arrives in Stage 4. */
+/* Shell chrome — visual tokens verbatim from the approved mockup
+   (design/mockups/redra-concept.html). The document area below the 44px strip
+   is the file's own world and is never themed by the shell. */
+
 :root {
   --paper: #f7f6f3;
+  --surface: #ffffff;
   --ink: #1c1b19;
+  --muted: #8a877f;
+  --line: rgba(28, 27, 25, 0.09);
+  --accent: #d9482b;
+  --hover: rgba(28, 27, 25, 0.04);
+}
+
+/* Default follows the OS unless the user pinned a theme. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --paper: #1b1a18;
+    --surface: #232220;
+    --ink: #eceae6;
+    --muted: #8f8c84;
+    --line: rgba(236, 234, 230, 0.12);
+    --accent: #ff6b4a;
+    --hover: rgba(236, 234, 230, 0.05);
+  }
+}
+
+:root[data-theme='dark'] {
+  --paper: #1b1a18;
+  --surface: #232220;
+  --ink: #eceae6;
+  --muted: #8f8c84;
+  --line: rgba(236, 234, 230, 0.12);
+  --accent: #ff6b4a;
+  --hover: rgba(236, 234, 230, 0.05);
 }
 
 * {
   box-sizing: border-box;
+  margin: 0;
 }
 
 html,
 body {
-  margin: 0;
   height: 100%;
   background: var(--paper);
   color: var(--ink);
-  font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
   user-select: none;
+  cursor: default;
+  overflow: hidden;
 }
 
-#strip {
+/* --- titlebar ------------------------------------------------------------ */
+
+#titlebar {
   height: 44px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  border-bottom: 1px solid rgba(28, 27, 25, 0.08);
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  position: relative;
   -webkit-app-region: drag;
-  font-weight: 600;
+}
+
+#doc-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+#title-app {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+#title-doc {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+#title-doc[hidden] {
+  display: none;
 }
 
 #dirty-dot {
   width: 7px;
   height: 7px;
-  margin-left: 8px;
   border-radius: 50%;
-  background: #d9482b;
+  background: var(--accent);
+}
+
+#tb-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
 }
 
 #mode-pill {
-  margin-left: 10px;
+  margin-right: 6px;
   padding: 2px 10px;
-  border: 1px solid rgba(28, 27, 25, 0.18);
+  border: 1px solid var(--line);
   border-radius: 999px;
   font-size: 11px;
-  font-weight: 400;
-  opacity: 0.75;
+  color: var(--muted);
 }
 
-#placeholder {
+.tb-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 0;
+  -webkit-app-region: no-drag;
+}
+
+.tb-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+.tb-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.tb-btn.active {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.tb-btn:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.tb-btn[hidden] {
+  display: none;
+}
+
+/* --- start screen --------------------------------------------------------- */
+
+#start {
   height: calc(100% - 44px);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
 }
 
-#placeholder h1 {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 700;
+body[data-state='doc'] #start {
+  display: none;
 }
 
-#open-btn {
-  -webkit-app-region: no-drag;
-  font: inherit;
-  color: var(--ink);
+.glyph {
+  width: 64px;
+  height: 64px;
+  border-radius: 15px;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+
+.glyph .bar {
+  width: 5px;
+  height: 30px;
+  border-radius: 3px;
   background: #fff;
-  border: 1px solid rgba(28, 27, 25, 0.25);
-  border-radius: 8px;
-  padding: 8px 20px;
-  cursor: pointer;
+  animation: blink 1.2s steps(1) infinite;
 }
 
-#open-btn:hover {
-  background: #efede8;
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
 }
 
-.hint {
-  margin: 0;
-  opacity: 0.55;
+.wordmark {
+  font-size: 27px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 
-#recents {
-  list-style: none;
-  margin: 16px 0 0;
-  padding: 0;
-  max-width: 70%;
+.tagline {
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.drop {
+  margin-top: 26px;
+  border: 1.5px dashed var(--line);
+  border-radius: 10px;
+  padding: 11px 22px;
+  font-size: 13px;
+  color: var(--muted);
+  transition: border-color 0.12s ease;
+}
+
+.drop b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+body.drag-over .drop {
+  border-color: var(--muted);
+}
+
+/* --- recents --------------------------------------------------------------- */
+
+.recent {
+  margin-top: 30px;
+  width: 430px;
+}
+
+.recent[hidden] {
+  display: none;
+}
+
+.recent-label {
   font-size: 12px;
-  opacity: 0.7;
+  color: var(--muted);
+  margin-bottom: 6px;
+  padding: 0 10px;
 }
 
-#recents li {
-  cursor: pointer;
-  padding: 2px 0;
+.row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13.5px;
+}
+
+.row:hover {
+  background: var(--hover);
+}
+
+.row svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--muted);
+}
+
+.row .meta {
+  min-width: 0;
+}
+
+.row .name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-#recents li:hover {
-  text-decoration: underline;
+.row .path {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-body.drag-over #placeholder {
-  outline: 2px dashed rgba(28, 27, 25, 0.3);
-  outline-offset: -16px;
+.row .when {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  flex: none;
+  padding-left: 11px;
 }
