@@ -5,8 +5,9 @@ import { REDRA_ID_ATTR, type RedraDoc } from './types.js';
 
 /**
  * Serialize the document for saving — no data-redra-id anywhere: the pristine
- * tree is never stamped, and applyOps strips the attribute from editText
- * fragments (which may come from the stamped live DOM).
+ * tree is never stamped, and applyOps runs every editText fragment (captured
+ * from the stamped live DOM) through the provenance gate, which verifies each
+ * stamp against the pristine source and removes it.
  *
  * With no ops the ORIGINAL source string is returned byte-for-byte: opening
  * and saving an unedited file must not rewrite it (no phantom diffs).
