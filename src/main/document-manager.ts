@@ -109,6 +109,11 @@ export class DocumentManager {
     return { opened, timings };
   }
 
+  /** Drop the current document (single-window v1: it dies with its window). */
+  close(): void {
+    this.current = null;
+  }
+
   /** Lookup for the redra:// protocol handler. Unknown/stale docId → undefined → 404. */
   getServed(docId: string): { dir: string; html: string } | undefined {
     const cur = this.current;
