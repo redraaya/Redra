@@ -254,13 +254,17 @@ body[data-state='doc'] #start {
   margin-top: 6px;
 }
 
+/* A real <button> (click = ⌘O, keyboard-reachable) styled as the dashed pill. */
 .drop {
   margin-top: 26px;
   border: 1.5px dashed var(--line);
   border-radius: 10px;
   padding: 11px 22px;
+  font-family: inherit;
   font-size: 13px;
   color: var(--muted);
+  background: none;
+  cursor: pointer;
   transition: border-color 0.12s ease;
 }
 
@@ -269,6 +273,7 @@ body[data-state='doc'] #start {
   font-weight: 500;
 }
 
+.drop:hover,
 body.drag-over .drop {
   border-color: var(--muted);
 }

@@ -31,6 +31,7 @@ const btnSave = $('btn-save') as HTMLButtonElement;
 const btnTheme = $('btn-theme') as HTMLButtonElement;
 const recentBlock = $('recent-block');
 const recentsEl = $('recents');
+const dropPill = $('drop-pill') as HTMLButtonElement;
 
 // --- language -----------------------------------------------------------------
 
@@ -53,12 +54,9 @@ updateClose.setAttribute('aria-label', t('shell.updateHide'));
   if (tagline) tagline.textContent = t('shell.tagline');
   const recentLabel = document.querySelector('.recent-label');
   if (recentLabel) recentLabel.textContent = t('shell.recent');
-  const dropPill = document.getElementById('drop-pill');
-  if (dropPill) {
-    const hotkey = document.createElement('b');
-    hotkey.textContent = '⌘O';
-    dropPill.replaceChildren(t('shell.dropPrefix'), hotkey);
-  }
+  const hotkey = document.createElement('b');
+  hotkey.textContent = '⌘O';
+  dropPill.replaceChildren(t('shell.dropPrefix'), hotkey);
 }
 
 // --- theme ------------------------------------------------------------------
@@ -94,6 +92,10 @@ void redra.getSettings().then((s) => applyTheme(s.shellTheme));
 btnPreview.addEventListener('click', () => redra.togglePreview());
 btnPdf.addEventListener('click', () => void redra.exportPdf());
 btnSave.addEventListener('click', () => void redra.save());
+
+// --- start screen: the drop pill doubles as «Open…» -----------------------------
+
+dropPill.addEventListener('click', () => void redra.openFileDialog());
 
 // --- document state -----------------------------------------------------------
 
