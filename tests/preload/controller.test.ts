@@ -203,3 +203,110 @@ describe('hover survives the trip to the handle pill', () => {
     expect(b.classList.contains('redra-hover')).toBe(true);
   });
 });
+
+describe('hover for NESTED blocks: parent containers and page wrappers', () => {
+  let bridge: ReturnType<typeof makeBridge>;
+  let controller: EditorController;
+
+  const over = (el: Element, init: MouseEventInit = {}): void => {
+    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, ...init }));
+  };
+
+  const rect = (r: Partial<DOMRect>): (() => DOMRect) =>
+    () =>
+      ({
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: 0,
+        height: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+        ...r,
+      }) as DOMRect;
+
+  beforeEach(() => {
+    if (typeof window.requestAnimationFrame !== 'function') {
+      window.requestAnimationFrame = ((cb: FrameRequestCallback) =>
+        setTimeout(() => cb(0), 0)) as typeof window.requestAnimationFrame;
+    }
+    // Wrapper fills the viewport (rect stubbed huge); section/p are nested
+    // blocks. The section has two children and the wrapper two, so all of
+    // them qualify as blocks for resolveBlock.
+    document.body.innerHTML =
+      '<div data-redra-id="rW" id="w">' +
+      '<section data-redra-id="rS" id="s">' +
+      '<p data-redra-id="rP" id="p">абзац</p>' +
+      '<p data-redra-id="rQ" id="q">второй</p>' +
+      '</section>' +
+      '<footer data-redra-id="rF" id="f">подвал</footer>' +
+      '</div>';
+    const wrapper = document.getElementById('w')!;
+    wrapper.getBoundingClientRect = rect({
+      left: 0,
+      right: 1024,
+      top: 0,
+      bottom: 800,
+      width: 1024,
+      height: 800, // >= 0.9 * innerHeight (jsdom: 768) → page-wrapper noise
+    });
+    document.getElementById('p')!.getBoundingClientRect = rect({
+      left: 100,
+      right: 300,
+      top: 50,
+      bottom: 80,
+      width: 200,
+      height: 30,
+    });
+    bridge = makeBridge();
+    controller = createEditorController(window, bridge, normalizeEditedHtml);
+    controller.setEditing(true);
+  });
+
+  afterEach(() => {
+    controller.destroy();
+    document.body.innerHTML = '';
+  });
+
+  it('keeps the nested block hovered while the pointer crosses its PARENT toward the pill', () => {
+    const p = document.getElementById('p')!;
+    over(p);
+    expect(p.classList.contains('redra-hover')).toBe(true);
+    // En route to the pill the pointer enters the section (an ancestor that
+    // resolves as a block) — the hover must not jump to the parent.
+    over(document.getElementById('s')!, { clientX: 70, clientY: 65 });
+    expect(p.classList.contains('redra-hover')).toBe(true);
+    expect(document.getElementById('s')!.classList.contains('redra-hover')).toBe(false);
+    // Same when the crossing lands on the page wrapper.
+    over(document.getElementById('w')!, { clientX: 60, clientY: 70 });
+    expect(p.classList.contains('redra-hover')).toBe(true);
+  });
+
+  it('releases the hover when the pointer leaves the reach zone onto an ancestor', () => {
+    const p = document.getElementById('p')!;
+    const w = document.getElementById('w')!;
+    over(p);
+    over(w, { clientX: 70, clientY: 300 }); // far below p's reach
+    expect(p.classList.contains('redra-hover')).toBe(false);
+    // The viewport-filling wrapper itself is suppressed: no hover UI at all.
+    expect(w.classList.contains('redra-hover')).toBe(false);
+  });
+
+  it('never shows the hover UI for a viewport-filling wrapper, even from cold', () => {
+    const w = document.getElementById('w')!;
+    over(w, { clientX: 500, clientY: 400 });
+    expect(w.classList.contains('redra-hover')).toBe(false);
+    expect(document.querySelector('.redra-hover')).toBeNull();
+  });
+
+  it('still switches immediately between sibling blocks', () => {
+    const p = document.getElementById('p')!;
+    const q = document.getElementById('q')!;
+    over(p);
+    over(q, { clientX: 110, clientY: 60 }); // inside p's reach, but q is no ancestor
+    expect(p.classList.contains('redra-hover')).toBe(false);
+    expect(q.classList.contains('redra-hover')).toBe(true);
+  });
+});
