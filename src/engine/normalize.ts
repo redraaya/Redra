@@ -6,8 +6,14 @@ import type { Element } from './types.js';
 type ChildNode = DefaultTreeAdapterMap['childNode'];
 type TextNode = DefaultTreeAdapterMap['textNode'];
 
-/** Inline formatting elements that survive normalization (bare, lowercase). */
-const KEPT_TAGS = new Set([
+/**
+ * Inline formatting elements that survive normalization (bare, lowercase).
+ * Shared with the provenance gate in ops.ts: a stamped element whose claim
+ * does not verify is downgraded by these same NEW-content rules.
+ *
+ * @internal
+ */
+export const KEPT_TAGS = new Set([
   'b',
   'strong',
   'i',
@@ -22,8 +28,14 @@ const KEPT_TAGS = new Set([
   'mark',
 ]);
 
-/** Elements removed together with their entire content. */
-const DROPPED_TAGS = new Set([
+/**
+ * Elements removed together with their entire content. Shared with the
+ * provenance gate in ops.ts: these tags never survive without verified
+ * provenance.
+ *
+ * @internal
+ */
+export const DROPPED_TAGS = new Set([
   'script',
   'style',
   'template',
@@ -103,8 +115,12 @@ function isBr(node: ChildNode): boolean {
  *
  * Protocol-relative `//host` hrefs are kept on purpose: they are not
  * executable, and Cmd+click opens them in an external browser anyway.
+ *
+ * Shared with the provenance gate in ops.ts (downgrade path for <a>).
+ *
+ * @internal
  */
-function isSafeHref(value: string): boolean {
+export function isSafeHref(value: string): boolean {
   const cleaned = value.replace(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+/, '');
   const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(cleaned);
   if (!scheme) return true; // relative, anchor, or schemeless reference
@@ -117,42 +133,17 @@ function filterAttrs(el: Element): Element['attrs'] {
   return el.attrs.filter((a) => a.name === 'href' && isSafeHref(a.value));
 }
 
-/** True when the element carries the stamp, i.e. it is ORIGINAL file markup. */
+/** True when the element carries the stamp, i.e. it CLAIMS to be original file markup. */
 function isStamped(el: Element): boolean {
   return el.attrs.some((a) => a.name === REDRA_ID_ATTR);
 }
 
 /**
- * Attributes that survive on a STAMPED element: everything the user's file
- * had, minus (a) the stamp itself, (b) on* event handlers (defense: the
- * saved file must not gain handlers we cannot vouch for via contenteditable
- * shuffling), (c) href/src values with executable schemes
- * (javascript:/vbscript:/data: — anything isSafeHref rejects); the
- * attribute goes, the element stays.
+ * Tags whose stamped content passes through verbatim (no recursion).
+ * Mirrors VERBATIM_TAGS in the ops.ts gate, which later requires that
+ * content to be byte-identical to the pristine source.
  */
-function filterStampedAttrs(el: Element): Element['attrs'] {
-  return el.attrs.filter((a) => {
-    if (a.name === REDRA_ID_ATTR) return false;
-    if (/^on/i.test(a.name)) return false;
-    if ((a.name === 'href' || a.name === 'src') && !isSafeHref(a.value)) return false;
-    return true;
-  });
-}
-
-/** Tags whose stamped content passes through verbatim (no recursion). */
 const STAMPED_VERBATIM_TAGS = new Set(['script', 'style', 'template']);
-
-/** Strip data-redra-id everywhere under `el`, touching nothing else. */
-function stripStampsDeep(el: Element): void {
-  el.attrs = el.attrs.filter((a) => a.name !== REDRA_ID_ATTR);
-  const children =
-    el.tagName === 'template' && 'content' in el
-      ? (el as DefaultTreeAdapterMap['template']).content.childNodes
-      : el.childNodes;
-  for (const child of children) {
-    if (isElementNode(child)) stripStampsDeep(child);
-  }
-}
 
 /**
  * Already-emitted output counts as "preceding content" for the block-break
@@ -185,11 +176,12 @@ function collapseBrRuns(nodes: ChildNode[]): ChildNode[] {
  * The single recursive transform: maps a list of sibling nodes to the
  * normalized list, in order.
  *
- * - a STAMPED element (data-redra-id) is the file's ORIGINAL markup, not
- *   contenteditable junk: ANY tag survives with all its attributes (minus
- *   the stamp, on* handlers and unsafe href/src — filterStampedAttrs), no
- *   <br> conversion, children recursed with these same rules;
- *   script/style/template keep their content verbatim;
+ * - a STAMPED element (data-redra-id) CLAIMS to be the file's original
+ *   markup: ANY tag survives with ALL its attributes as-is — INCLUDING the
+ *   stamp itself — no <br> conversion, children recursed with these same
+ *   rules; script/style/template keep their content verbatim. Nothing is
+ *   sanitized here: the stamp is only a claim, and applyOps verifies it
+ *   against the pristine source before anything reaches the saved file;
  * - text stays as-is, comments vanish;
  * - unstamped DROPPED_TAGS vanish with their whole subtree;
  * - unstamped KEPT_TAGS keep only allowed attributes and recurse;
@@ -214,15 +206,13 @@ function normalizeSiblings(nodes: readonly ChildNode[], precededByVisible: boole
       continue;
     }
     if (isStamped(node)) {
-      // Original markup from the user's file: passes through whole.
-      if (STAMPED_VERBATIM_TAGS.has(node.tagName)) {
-        // Original script/style/template content stays byte-identical;
-        // only stamps are removed (a stamped template may carry stamped
-        // children inside its content fragment).
-        stripStampsDeep(node);
-        node.attrs = filterStampedAttrs(node);
-      } else {
-        node.attrs = filterStampedAttrs(node);
+      // Claims to be original markup from the user's file: passes through
+      // whole, attributes untouched, stamp kept — applyOps is the gate that
+      // verifies the claim against the pristine source.
+      if (!STAMPED_VERBATIM_TAGS.has(node.tagName)) {
+        // script/style/template content stays byte-identical (stamps inside
+        // a template's content included — the gate strips them after the
+        // content check); everything else recurses with these same rules.
         node.childNodes = normalizeSiblings(node.childNodes, false);
         for (const child of node.childNodes) child.parentNode = node;
       }
@@ -255,14 +245,30 @@ function normalizeSiblings(nodes: readonly ChildNode[], precededByVisible: boole
 
 /**
  * Normalize contenteditable-produced HTML before it is recorded as an
- * editText payload: keep only bare inline formatting (b, strong, i, em, u,
- * s, a, code, br, sub, sup, mark), strip all attributes except a safe href
- * on <a>, turn block elements (LINE_BREAK_TAGS) into <br>-separated lines,
- * drop scripts/styles/comments
- * with their content, and leave text untouched (no whitespace collapsing).
+ * editText payload. Two modes, decided per element by the data-redra-id
+ * stamp:
+ *
+ * NEW content (unstamped — typed or pasted during the session): keep only
+ * bare inline formatting (b, strong, i, em, u, s, a, code, br, sub, sup,
+ * mark), strip all attributes except a safe href on <a>, turn block
+ * elements (LINE_BREAK_TAGS) into <br>-separated lines, drop
+ * scripts/styles/comments with their content, and leave text untouched (no
+ * whitespace collapsing).
+ *
+ * STAMPED elements (data-redra-id present — provenance "came from the
+ * user's file"): pass through AS-IS, attributes and stamp included, with no
+ * sanitization whatsoever. TRUST MODEL: page scripts share the live DOM and
+ * can both forge stamps and mutate attributes of genuinely stamped
+ * elements, so a stamp here is only a CLAIM. The claim is verified later by
+ * the provenance gate in applyOps (ops.ts) against the pristine source:
+ * verified elements get their ORIGINAL attributes back (live mutations and
+ * the stamp drop out), unverified ones are downgraded to the NEW-content
+ * rules above. Stamps in this function's output are therefore EXPECTED, and
+ * stripping/sanitizing here would only destroy legitimate original markup.
  *
  * Pure parse5, no DOM — safe to call from the engine or a preload bundle.
- * Idempotent: normalizing already-normalized output is a no-op.
+ * Idempotent in both modes: a stamped element passes through unchanged, so
+ * re-normalizing the output takes the same branches and is a no-op.
  */
 export function normalizeEditedHtml(raw: string): string {
   const fragment = parseFragment(raw);
