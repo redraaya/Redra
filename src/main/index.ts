@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, shell } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,12 +11,14 @@ import { RecentsStore } from './recents-store.js';
 import { SettingsStore } from './settings-store.js';
 import { buildAppMenu, setBackupMenuChecked, setDocMenuEnabled } from './menu.js';
 import { EDITOR_CSS } from './editor-css.js';
+import { writeAtomic } from './lib/atomic-write.js';
 import { PerfLog } from './lib/perf.js';
 import { senderMatches } from './lib/sender.js';
 import { tildify } from './lib/tildify.js';
 import { validateOp } from './lib/validate-op.js';
 import { guardDocPush } from './lib/op-guard.js';
 import type {
+  ExportResult,
   OpPushResult,
   OpUndoResult,
   OpenResult,
@@ -49,6 +52,10 @@ let docView: WebContentsView | null = null;
 let pendingOpenPath: string | null = cliFile ? path.resolve(cliFile) : null;
 /** «Просмотр» state — single source of truth lives here in main. */
 let previewOn = false;
+/** Close-guard re-entrancy: true while the «Сохранить изменения?» flow runs. */
+let closeFlowActive = false;
+/** Set on before-quit so a confirmed close can resume the aborted Cmd+Q. */
+let quitRequested = false;
 
 // --- smoke gate: the run only succeeds once BOTH the document was served
 // AND the doc preload reported the editing layer alive ('doc:editorReady').
@@ -81,6 +88,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' || SMOKE) app.quit();
 });
 
+app.on('before-quit', () => {
+  quitRequested = true;
+});
+
 void app.whenReady().then(onReady);
 
 async function onReady(): Promise<void> {
@@ -101,6 +112,7 @@ async function onReady(): Promise<void> {
       open: () => void openViaDialog(),
       save: () => void doSave(false),
       saveAs: () => void doSave(true),
+      exportPdf: () => void exportPdf(),
       undo: () => docView?.webContents.send('edit:undo'),
       redo: () => docView?.webContents.send('edit:redo'),
       togglePreview: (checked) => setPreview(checked),
@@ -110,6 +122,12 @@ async function onReady(): Promise<void> {
   );
   registerIpc();
   createWindow(readyAt);
+
+  // Dev-run dock icon (packaged builds get it from electron-builder in Stage 5).
+  if (!app.isPackaged && process.platform === 'darwin') {
+    const dockPng = path.join(__dirname, '../../build/icon-512.png');
+    if (existsSync(dockPng)) app.dock?.setIcon(dockPng);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -176,6 +194,19 @@ function createWindow(readyAt: number): void {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   win.on('resize', layoutDocView);
+  win.on('close', (event) => {
+    if (SMOKE) return;
+    if (closeFlowActive) {
+      // A second close while the dialog is up must not slip through.
+      event.preventDefault();
+      return;
+    }
+    if (!docManager.currentDoc || !win) return;
+    // A document is open: even with a clean journal there may be an active
+    // edit session (typed text not yet committed) — intercept and go async.
+    event.preventDefault();
+    void handleCloseRequest(win);
+  });
   win.on('closed', () => {
     win = null;
     docView = null;
@@ -270,6 +301,44 @@ function layoutDocView(): void {
     width: width ?? 0,
     height: Math.max(0, (height ?? 0) - SHELL_STRIP_HEIGHT),
   });
+}
+
+/**
+ * Close guard: commit any in-flight edit, then — if the journal is dirty —
+ * ask «Сохранить / Не сохранять / Отмена». destroy() bypasses 'close', so the
+ * approved path cannot re-trigger the guard.
+ */
+async function handleCloseRequest(w: BrowserWindow): Promise<void> {
+  closeFlowActive = true;
+  let destroyed = false;
+  try {
+    await commitActiveEdit();
+    const cur = docManager.currentDoc;
+    if (!cur || !cur.journal.dirty) {
+      destroyed = true;
+      return;
+    }
+    const name = path.basename(cur.filePath);
+    const { response } = await dialog.showMessageBox(w, {
+      type: 'warning',
+      message: `Сохранить изменения в «${name}»?`,
+      buttons: ['Сохранить', 'Не сохранять', 'Отмена'],
+      defaultId: 0,
+      cancelId: 2,
+    });
+    if (response === 0) {
+      const saved = await doSave(false);
+      // Save failed or was canceled (e.g. conflict «Отмена») — keep the window.
+      destroyed = saved.ok;
+    } else if (response === 1) {
+      destroyed = true;
+    }
+  } finally {
+    closeFlowActive = false;
+    if (destroyed && !w.isDestroyed()) w.destroy();
+    if (destroyed && quitRequested) app.quit();
+    if (!destroyed) quitRequested = false; // Cmd+Q was aborted by «Отмена»
+  }
 }
 
 // --- settings ----------------------------------------------------------------
@@ -434,14 +503,31 @@ async function doSave(saveAs: boolean): Promise<SaveResult> {
     asPath = result.filePath;
   }
 
-  const saved = await docManager.save(asPath);
+  let saved = await docManager.save(asPath);
+
+  // mtime conflict: someone changed the file on disk since open/last save.
+  if (!saved.ok && saved.conflict) {
+    if (SMOKE || !win) {
+      console.warn('[save] conflict: file on disk changed since open/last save');
+      return saved;
+    }
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning',
+      message: 'Файл на диске изменён другой программой',
+      detail: 'Перезаписать его версией из Redra? Внешние изменения будут потеряны.',
+      buttons: ['Перезаписать', 'Отмена'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) return { ok: false, canceled: true };
+    await docManager.acceptExternalMtime();
+    saved = await docManager.save(asPath);
+  }
+
   if (saved.ok) {
     const name = path.basename(saved.path);
     win?.setTitle(`${name} — Redra`);
     win?.webContents.send('doc:dirtyChanged', { dirty: cur.journal.dirty });
-  } else if (saved.conflict) {
-    // Placeholder until the real dialog in 4.2.
-    console.warn('[save] conflict: file on disk changed since open/last save');
   } else if (!saved.canceled) {
     // Generic failure (apply/serialize/write) — must never be silent.
     const message = saved.error ?? 'неизвестная ошибка';
@@ -450,6 +536,42 @@ async function doSave(saveAs: boolean): Promise<SaveResult> {
     else dialog.showErrorBox('Не удалось сохранить', message);
   }
   return saved;
+}
+
+/**
+ * «Экспорт в PDF…»: commit the active edit (so no editing chrome prints),
+ * ask where, print the live doc view, write atomically, reveal in Finder.
+ */
+async function exportPdf(): Promise<ExportResult> {
+  const cur = docManager.currentDoc;
+  const view = docView;
+  if (!cur || !view || !win) return { ok: false, error: 'Документ не открыт' };
+
+  await commitActiveEdit();
+
+  const pdfName = path.basename(cur.filePath).replace(/\.html?$/i, '') + '.pdf';
+  const result = await dialog.showSaveDialog(win, {
+    defaultPath: path.join(path.dirname(cur.filePath), pdfName),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+
+  try {
+    const t0 = performance.now();
+    const data = await view.webContents.printToPDF({
+      printBackground: true,
+      preferCSSPageSize: true,
+    });
+    await writeAtomic(result.filePath, data);
+    perf.record('export-pdf', performance.now() - t0, { bytes: data.length });
+    shell.showItemInFolder(result.filePath);
+    return { ok: true, path: result.filePath };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[pdf] export failed:', message);
+    dialog.showErrorBox('Не удалось экспортировать PDF', message);
+    return { ok: false, error: message };
+  }
 }
 
 // --- IPC -------------------------------------------------------------------
@@ -484,6 +606,10 @@ function registerIpc(): void {
   ipcMain.handle('doc:saveAs', (event) => {
     if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies SaveResult;
     return doSave(true);
+  });
+  ipcMain.handle('doc:exportPdf', (event) => {
+    if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies ExportResult;
+    return exportPdf();
   });
   ipcMain.on('mode:toggle', (event) => {
     if (!senderMatches(event, win?.webContents)) return;

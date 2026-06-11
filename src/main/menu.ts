@@ -5,6 +5,7 @@ export interface MenuHandlers {
   open(): void;
   save(): void;
   saveAs(): void;
+  exportPdf(): void;
   /** Cmd+Z — routed to the doc view's editing layer (A4 logic decides). */
   undo(): void;
   /** Cmd+Shift+Z. */
@@ -21,7 +22,7 @@ export interface MenuOptions {
 }
 
 /** Menu items that only make sense with a document open (start disabled). */
-const DOC_ITEM_IDS = ['file-save', 'file-save-as', 'view-preview'] as const;
+const DOC_ITEM_IDS = ['file-save', 'file-save-as', 'file-export-pdf', 'view-preview'] as const;
 
 export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void {
   const isMac = process.platform === 'darwin';
@@ -47,6 +48,13 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
       accelerator: 'CmdOrCtrl+Shift+S',
       enabled: false,
       click: () => handlers.saveAs(),
+    },
+    {
+      id: 'file-export-pdf',
+      label: 'Экспорт в PDF…',
+      accelerator: 'CmdOrCtrl+Shift+E',
+      enabled: false,
+      click: () => handlers.exportPdf(),
     },
     { type: 'separator' },
     {
