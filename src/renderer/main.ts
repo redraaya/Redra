@@ -35,9 +35,16 @@ redra.onDocOpened((info) => {
   void renderRecents();
 });
 
+const dirtyDot = document.getElementById('dirty-dot')!;
+const modePill = document.getElementById('mode-pill')!;
+
 redra.onDirtyChanged((state) => {
-  // Always clean until Stage 3; the wiring is what matters here.
-  console.log('[shell] dirty:', state.dirty);
+  dirtyDot.hidden = !state.dirty;
+});
+
+redra.onModeChanged((state) => {
+  // The pill is visible while «Просмотр» (preview) is on, i.e. editing off.
+  modePill.hidden = state.editing;
 });
 
 async function renderRecents(): Promise<void> {
