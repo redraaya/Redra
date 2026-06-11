@@ -17,6 +17,8 @@ import { REDRA_ID_ATTR } from '../../engine/types.js';
 
 const HANDLE_GAP = 16; // px between pill and block edge (mockup: -46px at 30px width)
 const HANDLE_WIDTH = 30;
+/** How far left of a block's rect the hover zone must extend to cover the pill. */
+export const HANDLE_REACH = HANDLE_WIDTH + HANDLE_GAP;
 
 const SHADOW_CSS = `
 :host { all: initial; }

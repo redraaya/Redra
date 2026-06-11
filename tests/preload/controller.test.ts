@@ -148,3 +148,58 @@ describe('editor controller (jsdom)', () => {
     expect(el('a').hasAttribute('contenteditable')).toBe(false);
   });
 });
+
+describe('hover survives the trip to the handle pill', () => {
+  let bridge: ReturnType<typeof makeBridge>;
+  let controller: EditorController;
+
+  const over = (el: Element, init: MouseEventInit = {}): void => {
+    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, ...init }));
+  };
+
+  beforeEach(() => {
+    if (typeof window.requestAnimationFrame !== 'function') {
+      window.requestAnimationFrame = ((cb: FrameRequestCallback) =>
+        setTimeout(() => cb(0), 0)) as typeof window.requestAnimationFrame;
+    }
+    document.body.innerHTML =
+      '<p data-redra-id="rA" id="a">первый</p><p data-redra-id="rB" id="b">второй</p>';
+    const a = document.getElementById('a')!;
+    a.getBoundingClientRect = () =>
+      ({ left: 100, right: 300, top: 50, bottom: 80, width: 200, height: 30, x: 100, y: 50, toJSON: () => ({}) }) as DOMRect;
+    bridge = makeBridge();
+    controller = createEditorController(window, bridge, normalizeEditedHtml);
+    controller.setEditing(true);
+  });
+
+  afterEach(() => {
+    controller.destroy();
+    document.body.innerHTML = '';
+  });
+
+  it('keeps the hovered block while the pointer crosses the gap to the pill', () => {
+    const a = document.getElementById('a')!;
+    over(a);
+    expect(a.classList.contains('redra-hover')).toBe(true);
+    // Pointer leaves the block toward the pill (left of the rect): mouseover
+    // fires on the page background where no block resolves — hover must hold.
+    over(document.body, { clientX: 70, clientY: 65 });
+    expect(a.classList.contains('redra-hover')).toBe(true);
+  });
+
+  it('clears the hover when the pointer leaves the reach zone entirely', () => {
+    const a = document.getElementById('a')!;
+    over(a);
+    over(document.body, { clientX: 70, clientY: 300 });
+    expect(a.classList.contains('redra-hover')).toBe(false);
+  });
+
+  it('switches immediately when another block is hovered', () => {
+    const a = document.getElementById('a')!;
+    const b = document.getElementById('b')!;
+    over(a);
+    over(b, { clientX: 70, clientY: 65 });
+    expect(a.classList.contains('redra-hover')).toBe(false);
+    expect(b.classList.contains('redra-hover')).toBe(true);
+  });
+});
