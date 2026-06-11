@@ -139,6 +139,20 @@ describe('DocumentManager backup setting (injected backupWriter)', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('a throwing backupWriter fails the save with an actionable, prefixed message', async () => {
+    const dm = new DocumentManager(new PerfLog());
+    dm.setBackupWriter(async () => {
+      throw new Error('disk full');
+    });
+    const file = await openWithEdit(dm);
+
+    const res = await dm.save();
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe('Не удалось создать резервную копию: disk full');
+    // The user file was never touched.
+    expect(await readFile(file, 'utf8')).toContain('<p>hi</p>');
+  });
+
   it('setBackupEnabled(false) suppresses the backup', async () => {
     const dm = new DocumentManager(new PerfLog());
     const { calls, writer } = makeWriter();

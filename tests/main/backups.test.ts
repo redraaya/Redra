@@ -39,12 +39,12 @@ describe('BackupStore.backupFor', () => {
     expect(store.backupPathFor(src)).toBe(store.backupPathFor(src));
   });
 
-  it('skips the write when that exact backup file already exists', async () => {
+  it('OVERWRITES an existing backup: each session\'s first save refreshes it with that session\'s original bytes', async () => {
     const src = path.join(dir, 'doc.html');
     const first = await store.backupFor(src, Buffer.from('FIRST'));
     const second = await store.backupFor(src, Buffer.from('SECOND'));
-    expect(second).toBe(first);
-    expect(await readFile(first, 'utf8')).toBe('FIRST'); // untouched
+    expect(second).toBe(first); // same deterministic path
+    expect(await readFile(first, 'utf8')).toBe('SECOND'); // refreshed, like .bak was
   });
 });
 
