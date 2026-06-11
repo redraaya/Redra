@@ -38,6 +38,23 @@ let pendingOpenPath: string | null = cliFile ? path.resolve(cliFile) : null;
 /** «Просмотр» state — single source of truth lives here in main. */
 let previewOn = false;
 
+// --- smoke gate: the run only succeeds once BOTH the document was served
+// AND the doc preload reported the editing layer alive ('doc:editorReady').
+let smokeServedAt: number | null = null;
+let smokeEditorReady = false;
+let smokeFinished = false;
+
+function maybeFinishSmoke(): void {
+  if (!SMOKE || smokeFinished || smokeServedAt === null || !smokeEditorReady) return;
+  smokeFinished = true;
+  for (const e of perf.all()) {
+    console.log(`[smoke] perf ${e.name} = ${e.ms}ms`, e.detail ?? '');
+  }
+  smokeOpsRoundtrip();
+  console.log('[smoke] editor ready — OK');
+  setTimeout(() => app.exit(0), 100);
+}
+
 // macOS: dock / Finder "open with"
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
@@ -329,11 +346,15 @@ async function openDocument(filePath: string): Promise<OpenResult> {
 
     if (SMOKE) {
       console.log('[smoke] document served:', opened.filePath);
-      for (const e of perf.all()) {
-        console.log(`[smoke] perf ${e.name} = ${e.ms}ms`, e.detail ?? '');
-      }
-      smokeOpsRoundtrip();
-      setTimeout(() => app.exit(0), 250);
+      smokeServedAt = performance.now();
+      maybeFinishSmoke();
+      // The editing layer must report in — a dead doc preload is a failed run.
+      setTimeout(() => {
+        if (!smokeFinished) {
+          console.error('[smoke] FAILED: doc preload never reported editorReady');
+          app.exit(1);
+        }
+      }, 5000);
     }
     return { ok: true, path: opened.filePath, name };
   } catch (err) {
@@ -463,5 +484,15 @@ function registerIpc(): void {
     }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
     void shell.openExternal(url);
+  });
+  // Liveness beacon from the doc preload (see doc.ts). Smoke runs treat a
+  // missing beacon as failure; outside smoke it is just a perf datapoint.
+  ipcMain.on('doc:editorReady', (event) => {
+    if (!senderMatches(event, docView?.webContents)) return;
+    if (smokeServedAt !== null) {
+      perf.record('serve-to-editor-ready', performance.now() - smokeServedAt);
+    }
+    smokeEditorReady = true;
+    maybeFinishSmoke();
   });
 }
