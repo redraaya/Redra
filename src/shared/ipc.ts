@@ -7,8 +7,14 @@
  *   'doc:open'         (path: string) → OpenResult — open a concrete file (drag-and-drop)
  *   'doc:save'         () → SaveResult
  *   'doc:saveAs'       () → SaveResult
- *   'recents:get'      () → string[]
+ *   'doc:exportPdf'    () → ExportResult          — printToPDF flow (dialog in main)
+ *   'recents:get'      () → RecentEntry[]
+ *   'settings:get'     () → Settings
+ *   'settings:set'     (patch: Partial<Settings>) → Settings
  *   'perf:get'         () → PerfEntry[]
+ *
+ * Channels (shell renderer → main, send):
+ *   'mode:toggle'      ()  — flip «Просмотр»; main stays the single source of truth
  *
  * Channels (doc preload → main, invoke):
  *   'ops:push'          (docId: string, op: Op) → OpPushResult — validate + journal.push
@@ -55,6 +61,29 @@ export type SaveResult =
   | { ok: true; path: string; skipped?: boolean }
   | { ok: false; canceled?: boolean; conflict?: boolean; error?: string };
 
+export type ExportResult =
+  | { ok: true; path: string }
+  | { ok: false; canceled?: boolean; error?: string };
+
+/** Shell preferences persisted in userData/settings.json (see main/settings-store). */
+export interface Settings {
+  /** Shell chrome theme; the document area is always the file's own world. */
+  shellTheme: 'system' | 'light' | 'dark';
+  /** Write <name>.html.bak with the original bytes on the first overwrite-save. */
+  backupOnFirstSave: boolean;
+}
+
+/** One row of the start screen's «Недавние» list (display-ready, built in main). */
+export interface RecentEntry {
+  path: string;
+  /** Basename, e.g. «отчёт.html». */
+  name: string;
+  /** Containing directory with the home dir shortened to «~». */
+  dir: string;
+  /** Date.now() of when the file was last opened in Redra (absent for legacy entries). */
+  openedAt?: number;
+}
+
 export interface DocOpenedInfo {
   path: string;
   name: string;
@@ -95,7 +124,12 @@ export interface RedraShellApi {
   pathForFile(file: File): string;
   save(): Promise<SaveResult>;
   saveAs(): Promise<SaveResult>;
-  getRecents(): Promise<string[]>;
+  exportPdf(): Promise<ExportResult>;
+  /** Flip «Просмотр» — main owns the state and answers with 'mode:changed'. */
+  togglePreview(): void;
+  getRecents(): Promise<RecentEntry[]>;
+  getSettings(): Promise<Settings>;
+  setSettings(patch: Partial<Settings>): Promise<Settings>;
   getPerf(): Promise<PerfEntry[]>;
   onDocOpened(cb: (info: DocOpenedInfo) => void): void;
   onDirtyChanged(cb: (state: DirtyState) => void): void;

@@ -78,6 +78,12 @@ const SHADOW_CSS = `
   .grip:hover, .trash:hover { color: #eceae6; }
   .indicator { background: rgba(236, 234, 230, 0.4); }
 }
+/* printToPDF renders print styles — editor chrome must never reach a PDF.
+   (The drag ghost lives OUTSIDE the shadow and cannot exist during export:
+   exportPdf commits the edit session first and no drag survives that.) */
+@media print {
+  .handle, .indicator { display: none !important; }
+}
 `;
 
 const TRASH_SVG =

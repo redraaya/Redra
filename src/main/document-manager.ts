@@ -3,13 +3,11 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { Journal, parseDocument, serializeForView, serializeSource } from '../engine/index.js';
 import type { RedraDoc } from '../engine/index.js';
+import { writeAtomic } from './lib/atomic-write.js';
 import { ensureUtf8Charset } from './lib/charset-rewrite.js';
 import { decodeHtml } from './lib/encoding.js';
 import type { PerfLog } from './lib/perf.js';
 import type { SaveResult } from '../shared/ipc.js';
-
-/** Setting-ready switch: create <name>.html.bak with the ORIGINAL bytes on first overwrite-save. */
-export const BACKUP_ENABLED = true;
 
 export interface OpenedDoc {
   docId: string;
@@ -47,11 +45,28 @@ export interface OpenTimings {
  */
 export class DocumentManager {
   private current: OpenedDoc | null = null;
+  /** Create <name>.html.bak with the ORIGINAL bytes on first overwrite-save (user setting). */
+  private backupEnabled = true;
 
   constructor(private readonly perf: PerfLog) {}
 
   get currentDoc(): OpenedDoc | null {
     return this.current;
+  }
+
+  setBackupEnabled(on: boolean): void {
+    this.backupEnabled = on;
+  }
+
+  /**
+   * Conflict resolution «Перезаписать»: adopt the on-disk mtime as ours so the
+   * next save() passes the guard and overwrites the external change.
+   */
+  async acceptExternalMtime(): Promise<void> {
+    const cur = this.current;
+    if (!cur) return;
+    const st = await fs.stat(cur.filePath).catch(() => null);
+    if (st) cur.lastKnownMtimeMs = st.mtimeMs;
   }
 
   async open(filePath: string): Promise<{ opened: OpenedDoc; timings: OpenTimings }> {
@@ -92,6 +107,11 @@ export class DocumentManager {
       totalMs: tStamp - t0,
     };
     return { opened, timings };
+  }
+
+  /** Drop the current document (single-window v1: it dies with its window). */
+  close(): void {
+    this.current = null;
   }
 
   /** Lookup for the redra:// protocol handler. Unknown/stale docId → undefined → 404. */
@@ -135,7 +155,7 @@ export class DocumentManager {
     }
 
     try {
-      if (overwritesCurrent && BACKUP_ENABLED && !cur.backupDone) {
+      if (overwritesCurrent && this.backupEnabled && !cur.backupDone) {
         await fs.writeFile(targetPath + '.bak', cur.originalBytes);
         cur.backupDone = true;
       }
@@ -154,7 +174,7 @@ export class DocumentManager {
         bytes = Buffer.from(html, 'utf8');
       }
 
-      await atomicWrite(targetPath, bytes);
+      await writeAtomic(targetPath, bytes);
 
       const st = await fs.stat(targetPath);
       cur.lastKnownMtimeMs = st.mtimeMs;
@@ -170,18 +190,5 @@ export class DocumentManager {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
-  }
-}
-
-/** Write to a tmp file in the same directory, then rename over the target. */
-async function atomicWrite(targetPath: string, bytes: Buffer): Promise<void> {
-  const dir = path.dirname(targetPath);
-  const tmp = path.join(dir, `.${path.basename(targetPath)}.${randomUUID().slice(0, 8)}.redra-tmp`);
-  try {
-    await fs.writeFile(tmp, bytes);
-    await fs.rename(tmp, targetPath);
-  } catch (err) {
-    await fs.unlink(tmp).catch(() => undefined);
-    throw err;
   }
 }

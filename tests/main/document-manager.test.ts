@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -74,5 +74,58 @@ describe('DocumentManager.save', () => {
     const saved = await readFile(file, 'utf8');
     expect(saved).toContain('charset="utf-8"');
     expect(saved).not.toContain('windows-1251');
+  });
+});
+
+describe('DocumentManager mtime conflict', () => {
+  it('reports conflict after an external mtime bump; acceptExternalMtime unblocks the save', async () => {
+    const file = path.join(dir, 'doc.html');
+    await writeFile(file, '<!doctype html><html><head></head><body><p>hi</p></body></html>');
+    const dm = new DocumentManager(new PerfLog());
+    const { opened } = await dm.open(file);
+    opened.journal.push({ type: 'editText', id: pId(opened), html: 'EDITED' });
+
+    // Someone touches the file on disk behind our back.
+    const future = new Date(Date.now() + 5_000);
+    await utimes(file, future, future);
+
+    const res = await dm.save();
+    expect(res).toMatchObject({ ok: false, conflict: true });
+    // «Отмена» path: nothing was written, the journal stays dirty.
+    expect(opened.journal.dirty).toBe(true);
+    expect(await readFile(file, 'utf8')).toContain('<p>hi</p>');
+
+    // «Перезаписать» path: adopt the external mtime, then the save goes through.
+    await dm.acceptExternalMtime();
+    const retried = await dm.save();
+    expect(retried.ok).toBe(true);
+    expect(await readFile(file, 'utf8')).toContain('EDITED');
+    expect(opened.journal.dirty).toBe(false);
+  });
+});
+
+describe('DocumentManager backup setting', () => {
+  async function openWithEdit(dm: DocumentManager): Promise<string> {
+    const file = path.join(dir, 'doc.html');
+    await writeFile(file, '<!doctype html><html><head></head><body><p>hi</p></body></html>');
+    const { opened } = await dm.open(file);
+    opened.journal.push({ type: 'editText', id: pId(opened), html: 'EDITED' });
+    return file;
+  }
+
+  it('writes <name>.html.bak with original bytes on first overwrite-save (default on)', async () => {
+    const dm = new DocumentManager(new PerfLog());
+    const file = await openWithEdit(dm);
+    expect((await dm.save()).ok).toBe(true);
+    const bak = await readFile(file + '.bak', 'utf8');
+    expect(bak).toContain('<p>hi</p>');
+  });
+
+  it('setBackupEnabled(false) suppresses the .bak', async () => {
+    const dm = new DocumentManager(new PerfLog());
+    dm.setBackupEnabled(false);
+    const file = await openWithEdit(dm);
+    expect((await dm.save()).ok).toBe(true);
+    await expect(readFile(file + '.bak')).rejects.toThrow();
   });
 });
