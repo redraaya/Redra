@@ -11,10 +11,15 @@
  *   'perf:get'         () → PerfEntry[]
  *
  * Channels (doc preload → main, invoke):
- *   'ops:push'          (op: Op) → OpPushResult    — validate + journal.push
- *   'ops:undo'          () → OpUndoResult          — journal.undo
- *   'ops:redo'          () → OpUndoResult          — journal.redo
- *   'link:openExternal' (url: string) → void       — http/https only
+ *   'ops:push'          (docId: string, op: Op) → OpPushResult — validate + journal.push
+ *   'ops:undo'          (docId: string) → OpUndoResult         — journal.undo
+ *   'ops:redo'          (docId: string) → OpUndoResult         — journal.redo
+ *   'link:openExternal' (url: string) → void                   — http/https only
+ *
+ * Every ops call carries the docId from the sender's URL (redra://doc/<docId>/):
+ * the doc view WebContents is reused across documents, so main rejects ops
+ * whose docId does not match the currently open document — an in-flight
+ * invoke from a previous document must never land in the new journal.
  *
  * Channels (doc preload → main, send):
  *   'edit:committed'    (nonce: string)            — ack for 'edit:commit'
@@ -72,7 +77,8 @@ export type OpUndoResult = { ok: boolean; dirty: boolean };
  * Bridge the doc preload uses to talk to main. Stays INSIDE the isolated
  * preload world — never exposed to the page (see src/preload/doc.ts).
  * `op` is the engine's Op type; declared structurally here so shared/ stays
- * free of engine imports.
+ * free of engine imports. The bridge itself stamps every call with the
+ * docId taken from the page URL — callers never pass it.
  */
 export interface RedraDocBridge {
   pushOp(op: { type: string; id: string; [extra: string]: unknown }): Promise<OpPushResult>;
