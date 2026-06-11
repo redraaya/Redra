@@ -7,7 +7,9 @@ Redra — визуальный редактор HTML-файлов для macOS. 
 ручку, удалите лишнее, нажмите ⌘S — тот же файл сохранён на диск. Или
 экспортируйте в PDF.
 
-![Документ в Redra: ручка блока при наведении](docs/assets/redra-doc.png)
+![Документ в Redra](docs/assets/redra-doc.png)
+
+![Возможности Redra](docs/assets/features.png)
 
 ## Как это устроено
 
