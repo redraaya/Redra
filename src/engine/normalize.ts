@@ -1,5 +1,6 @@
 import { defaultTreeAdapter, html, parseFragment, serialize } from 'parse5';
 import type { DefaultTreeAdapterMap } from 'parse5';
+import { REDRA_ID_ATTR } from './types.js';
 import type { Element } from './types.js';
 
 type ChildNode = DefaultTreeAdapterMap['childNode'];
@@ -110,10 +111,47 @@ function isSafeHref(value: string): boolean {
   return SAFE_SCHEMES.has(scheme[1]!.toLowerCase());
 }
 
-/** Attributes that survive on a kept element (rule: only safe href on <a>). */
+/** Attributes that survive on a kept NEW element (rule: only safe href on <a>). */
 function filterAttrs(el: Element): Element['attrs'] {
   if (el.tagName !== 'a') return [];
   return el.attrs.filter((a) => a.name === 'href' && isSafeHref(a.value));
+}
+
+/** True when the element carries the stamp, i.e. it is ORIGINAL file markup. */
+function isStamped(el: Element): boolean {
+  return el.attrs.some((a) => a.name === REDRA_ID_ATTR);
+}
+
+/**
+ * Attributes that survive on a STAMPED element: everything the user's file
+ * had, minus (a) the stamp itself, (b) on* event handlers (defense: the
+ * saved file must not gain handlers we cannot vouch for via contenteditable
+ * shuffling), (c) href/src values with executable schemes
+ * (javascript:/vbscript:/data: — anything isSafeHref rejects); the
+ * attribute goes, the element stays.
+ */
+function filterStampedAttrs(el: Element): Element['attrs'] {
+  return el.attrs.filter((a) => {
+    if (a.name === REDRA_ID_ATTR) return false;
+    if (/^on/i.test(a.name)) return false;
+    if ((a.name === 'href' || a.name === 'src') && !isSafeHref(a.value)) return false;
+    return true;
+  });
+}
+
+/** Tags whose stamped content passes through verbatim (no recursion). */
+const STAMPED_VERBATIM_TAGS = new Set(['script', 'style', 'template']);
+
+/** Strip data-redra-id everywhere under `el`, touching nothing else. */
+function stripStampsDeep(el: Element): void {
+  el.attrs = el.attrs.filter((a) => a.name !== REDRA_ID_ATTR);
+  const children =
+    el.tagName === 'template' && 'content' in el
+      ? (el as DefaultTreeAdapterMap['template']).content.childNodes
+      : el.childNodes;
+  for (const child of children) {
+    if (isElementNode(child)) stripStampsDeep(child);
+  }
 }
 
 /**
@@ -147,13 +185,18 @@ function collapseBrRuns(nodes: ChildNode[]): ChildNode[] {
  * The single recursive transform: maps a list of sibling nodes to the
  * normalized list, in order.
  *
+ * - a STAMPED element (data-redra-id) is the file's ORIGINAL markup, not
+ *   contenteditable junk: ANY tag survives with all its attributes (minus
+ *   the stamp, on* handlers and unsafe href/src — filterStampedAttrs), no
+ *   <br> conversion, children recursed with these same rules;
+ *   script/style/template keep their content verbatim;
  * - text stays as-is, comments vanish;
- * - DROPPED_TAGS vanish with their whole subtree;
- * - KEPT_TAGS keep only allowed attributes and recurse into children;
- * - everything else is unwrapped (children hoisted, recursed); a
- *   LINE_BREAK_TAGS block with visible content already before it
- *   contributes one <br> first, preserving the line break contenteditable
- *   expressed as a block;
+ * - unstamped DROPPED_TAGS vanish with their whole subtree;
+ * - unstamped KEPT_TAGS keep only allowed attributes and recurse;
+ * - every other unstamped element is unwrapped (children hoisted,
+ *   recursed); a LINE_BREAK_TAGS block with visible content already before
+ *   it contributes one <br> first, preserving the line break
+ *   contenteditable expressed as a block;
  * - finally <br> runs longer than two collapse to two.
  *
  * `precededByVisible` carries "visible content was already emitted before
@@ -168,6 +211,22 @@ function normalizeSiblings(nodes: readonly ChildNode[], precededByVisible: boole
     if (node.nodeName === '#comment') continue;
     if (!isElementNode(node)) {
       if (isTextNode(node)) out.push(node);
+      continue;
+    }
+    if (isStamped(node)) {
+      // Original markup from the user's file: passes through whole.
+      if (STAMPED_VERBATIM_TAGS.has(node.tagName)) {
+        // Original script/style/template content stays byte-identical;
+        // only stamps are removed (a stamped template may carry stamped
+        // children inside its content fragment).
+        stripStampsDeep(node);
+        node.attrs = filterStampedAttrs(node);
+      } else {
+        node.attrs = filterStampedAttrs(node);
+        node.childNodes = normalizeSiblings(node.childNodes, false);
+        for (const child of node.childNodes) child.parentNode = node;
+      }
+      out.push(node);
       continue;
     }
     if (DROPPED_TAGS.has(node.tagName)) continue;
