@@ -16,6 +16,7 @@ import { EDITOR_CSS } from './editor-css.js';
 import { PerfLog } from './lib/perf.js';
 import { senderMatches } from './lib/sender.js';
 import { DEFAULT_SETTINGS } from './lib/settings.js';
+import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { tildify } from './lib/tildify.js';
 import { guardDocPush } from './lib/op-guard.js';
 import { createSaveFlow } from './save-flow.js';
@@ -139,6 +140,7 @@ async function onReady(): Promise<void> {
   );
   registerIpc();
   createWindow(readyAt);
+  scheduleUpdateCheck();
 
   // Dev-run dock icon (packaged builds get it from electron-builder in Stage 5).
   if (!app.isPackaged && process.platform === 'darwin') {
@@ -337,6 +339,43 @@ async function showBackupsFolder(): Promise<void> {
   if (err) console.error('[backups] openPath failed:', err);
 }
 
+// --- update check ------------------------------------------------------------
+
+/**
+ * One quiet check per launch, ~8s after ready so it never touches the start
+ * budget. Offline / API errors stay silent; the shell only hears about a
+ * strictly newer release the user has not dismissed.
+ */
+function scheduleUpdateCheck(): void {
+  if (SMOKE) return; // smoke runs are short-lived and must stay network-free
+  setTimeout(() => {
+    void fetchLatestRelease().then((latest) => {
+      if (!latest || !win) return;
+      const dismissed = settingsStore.get().dismissedUpdateVersion;
+      if (!shouldNotify(app.getVersion(), latest.version, dismissed)) return;
+      win.webContents.send('update:available', {
+        version: latest.version,
+        url: latest.url,
+      });
+    });
+  }, 8000);
+}
+
+/** Only the project's own release pages may leave the app via the update pill. */
+function isRedraReleaseUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return (
+    parsed.protocol === 'https:' &&
+    parsed.hostname === 'github.com' &&
+    parsed.pathname.startsWith('/redraaya/Redra/')
+  );
+}
+
 // --- editing mode + edit-session commit -------------------------------------
 
 /** Toggle «Просмотр»: editing layer off in the doc view, pill in the shell. */
@@ -518,6 +557,16 @@ function registerIpc(): void {
     return applySettings(patch);
   });
   ipcMain.handle('perf:get', (event) => (fromShell(event) ? perf.all() : []));
+  ipcMain.on('update:open', (event, url: unknown) => {
+    if (!senderMatches(event, win?.webContents)) return;
+    if (typeof url !== 'string' || !isRedraReleaseUrl(url)) return;
+    void shell.openExternal(url);
+  });
+  ipcMain.on('update:dismiss', (event, version: unknown) => {
+    if (!senderMatches(event, win?.webContents)) return;
+    if (typeof version !== 'string' || version.length === 0) return;
+    void applySettings({ dismissedUpdateVersion: version });
+  });
 
   // --- doc-view channels (Stage 3 editing bridge) ---
   // Every ops call carries the docId baked into the sender's URL: the doc

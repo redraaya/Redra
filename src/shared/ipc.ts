@@ -15,6 +15,9 @@
  *
  * Channels (shell renderer → main, send):
  *   'mode:toggle'      ()  — flip «Просмотр»; main stays the single source of truth
+ *   'update:open'      (url: string)     — open the release page; main re-checks
+ *                                          the url is https://github.com/redraaya/Redra/…
+ *   'update:dismiss'   (version: string) — persist dismissedUpdateVersion
  *
  * Channels (doc preload → main, invoke):
  *   'ops:push'          (docId: string, op: Op) → OpPushResult — validate + journal.push
@@ -35,6 +38,8 @@
  *   'doc:opened'        DocOpenedInfo
  *   'doc:dirtyChanged'  DirtyState   — pushed on every ops push/undo/redo/save
  *   'mode:changed'      ModeState    — «Просмотр» toggled
+ *   'update:available'  UpdateInfo   — once per launch, ~8s after ready, only
+ *                                      when a newer non-dismissed release exists
  *
  * Events (main → doc preload):
  *   'mode:set'          ModeState    — arm/disarm the editing layer
@@ -71,6 +76,8 @@ export interface Settings {
   shellTheme: 'system' | 'light' | 'dark';
   /** Write <name>.html.bak with the original bytes on the first overwrite-save. */
   backupOnFirstSave: boolean;
+  /** Update-pill version the user dismissed with ✕ — never offer it again. */
+  dismissedUpdateVersion?: string;
 }
 
 /** One row of the start screen's «Недавние» list (display-ready, built in main). */
@@ -96,6 +103,14 @@ export interface DirtyState {
 export interface ModeState {
   /** True when the live editing layer is armed (default); false = «Просмотр». */
   editing: boolean;
+}
+
+/** Payload of 'update:available' — a newer release the user has not dismissed. */
+export interface UpdateInfo {
+  /** Version without the leading «v», e.g. «0.2.0». */
+  version: string;
+  /** Release page on github.com/redraaya/Redra. */
+  url: string;
 }
 
 export type OpPushResult = { ok: true } | { ok: false; error: string };
@@ -134,4 +149,9 @@ export interface RedraShellApi {
   onDocOpened(cb: (info: DocOpenedInfo) => void): void;
   onDirtyChanged(cb: (state: DirtyState) => void): void;
   onModeChanged(cb: (state: ModeState) => void): void;
+  onUpdateAvailable(cb: (info: UpdateInfo) => void): void;
+  /** Open the release page in the default browser (main validates the url). */
+  openUpdate(url: string): void;
+  /** Hide the pill forever for this version (persists dismissedUpdateVersion). */
+  dismissUpdate(version: string): void;
 }

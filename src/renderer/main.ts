@@ -21,6 +21,9 @@ const titleDoc = $('title-doc');
 const docName = $('doc-name');
 const dirtyDot = $('dirty-dot');
 const modePill = $('mode-pill');
+const updatePill = $('update-pill');
+const updateText = $('update-text');
+const updateClose = $('update-close') as HTMLButtonElement;
 const btnPreview = $('btn-preview') as HTMLButtonElement;
 const btnPdf = $('btn-pdf') as HTMLButtonElement;
 const btnSave = $('btn-save') as HTMLButtonElement;
@@ -85,6 +88,28 @@ redra.onModeChanged((state) => {
   // The pill is visible while «Просмотр» (preview) is on, i.e. editing off.
   modePill.hidden = state.editing;
   btnPreview.classList.toggle('active', !state.editing);
+});
+
+// --- update pill ----------------------------------------------------------------
+
+// Quiet by design: shows up only when main says a newer release exists,
+// visible in both start and doc states, gone for good after ✕.
+let updateInfo: { version: string; url: string } | null = null;
+
+redra.onUpdateAvailable((info) => {
+  updateInfo = info;
+  updateText.textContent = `Доступна v${info.version}`;
+  updatePill.hidden = false;
+});
+
+updatePill.addEventListener('click', () => {
+  if (updateInfo) redra.openUpdate(updateInfo.url);
+});
+
+updateClose.addEventListener('click', (e) => {
+  e.stopPropagation(); // the pill itself opens the release page
+  if (updateInfo) redra.dismissUpdate(updateInfo.version);
+  updatePill.hidden = true;
 });
 
 // --- drag-and-drop (whole window) ----------------------------------------------

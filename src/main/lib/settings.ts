@@ -28,5 +28,8 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
   if (typeof p['backupOnFirstSave'] === 'boolean') {
     next.backupOnFirstSave = p['backupOnFirstSave'];
   }
+  if (typeof p['dismissedUpdateVersion'] === 'string') {
+    next.dismissedUpdateVersion = p['dismissedUpdateVersion'];
+  }
   return next;
 }

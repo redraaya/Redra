@@ -10,6 +10,7 @@ import type {
   RedraShellApi,
   SaveResult,
   Settings,
+  UpdateInfo,
 } from '../shared/ipc.js';
 
 const api: RedraShellApi = {
@@ -34,6 +35,11 @@ const api: RedraShellApi = {
   onModeChanged: (cb: (state: ModeState) => void) => {
     ipcRenderer.on('mode:changed', (_event, state: ModeState) => cb(state));
   },
+  onUpdateAvailable: (cb: (info: UpdateInfo) => void) => {
+    ipcRenderer.on('update:available', (_event, info: UpdateInfo) => cb(info));
+  },
+  openUpdate: (url: string) => ipcRenderer.send('update:open', url),
+  dismissUpdate: (version: string) => ipcRenderer.send('update:dismiss', version),
 };
 
 contextBridge.exposeInMainWorld('redra', api);
