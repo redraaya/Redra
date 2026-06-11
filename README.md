@@ -1,24 +1,46 @@
-# Redra
+# Redra — a visual editor for HTML files
 
 **Open HTML. Click. Write.**
 
-Redra is a visual HTML file editor for macOS. Open any HTML file — it renders
-just like Chrome. Click into the text and write. Drag blocks by their handle,
-delete what you don't need, hit ⌘S — and the same file is saved back to disk.
-Or export it to PDF.
+Redra is a WYSIWYG editor for plain HTML files on macOS. Open any HTML file —
+a report, a presentation, an AI-generated page — and it renders exactly like
+it does in Chrome. Click into the text and type. Drag blocks by their handle,
+delete what you don't need, hit ⌘S — and the **same file** is saved back to
+disk. No code, no broken layout. Or export it to PDF.
 
 ![A document in Redra](docs/assets/redra-doc.png)
 
 ![Redra features](docs/assets/features.png)
 
-## How it works
+## Why your file is safe
 
-Your edits live on top of an untouched source: when a file is opened, parse5
-parses it into a reference tree, and every action you take is recorded in an
-operation journal. The live DOM in the window is never serialized — on save,
-the journal is applied to the reference tree, so the only thing that reaches
-the file is what you actually changed. Saving with no edits writes the
-original back byte for byte: no phantom git diffs, no "tidied up" markup.
+Redra never rewrites your file — it edits it.
+
+Most tools that "open" HTML save their **own version** of it: styles mangled,
+scripts reformatted, layout subtly broken (try editing an HTML file in Word).
+Redra keeps the original untouched and records your edits as a short list of
+operations. On save, exactly those operations are applied to the original —
+and nothing else. Change one word, and one word is all that changes in the
+file. Change nothing, and the saved file is byte-for-byte identical to what
+you opened.
+
+That's the whole trick — and it means your embedded styles, scripts, charts
+and fonts survive every edit.
+
+<details>
+<summary>For the technically curious</summary>
+
+On open, the file is parsed (parse5) into a pristine reference tree; the
+window shows a stamped copy where every source element carries a stable id.
+User actions become journal operations (<code>editText</code>,
+<code>deleteBlock</code>, <code>moveBlock</code>) referencing those ids. The
+live DOM is never serialized — page scripts can mutate it freely without
+polluting saves. On ⌘S the journal is replayed onto a clone of the pristine
+tree; element attributes are restored from the source (provenance check), so
+even runtime DOM state can't leak into the file. An empty journal short-cuts
+to writing the original bytes.
+
+</details>
 
 ![Redra start screen](docs/assets/redra-start.png)
 
