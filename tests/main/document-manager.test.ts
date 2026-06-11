@@ -104,7 +104,16 @@ describe('DocumentManager mtime conflict', () => {
   });
 });
 
-describe('DocumentManager backup setting', () => {
+describe('DocumentManager backup setting (injected backupWriter)', () => {
+  /** Fake central-backup writer: records calls, writes nothing anywhere. */
+  function makeWriter() {
+    const calls: Array<{ filePath: string; bytes: Buffer }> = [];
+    const writer = async (filePath: string, bytes: Buffer): Promise<void> => {
+      calls.push({ filePath, bytes });
+    };
+    return { calls, writer };
+  }
+
   async function openWithEdit(dm: DocumentManager): Promise<string> {
     const file = path.join(dir, 'doc.html');
     await writeFile(file, '<!doctype html><html><head></head><body><p>hi</p></body></html>');
@@ -113,17 +122,44 @@ describe('DocumentManager backup setting', () => {
     return file;
   }
 
-  it('writes <name>.html.bak with original bytes on first overwrite-save (default on)', async () => {
+  it('hands the ORIGINAL bytes to the writer on first overwrite-save (default on), once per session', async () => {
+    const dm = new DocumentManager(new PerfLog());
+    const { calls, writer } = makeWriter();
+    dm.setBackupWriter(writer);
+    const file = await openWithEdit(dm);
+
+    expect((await dm.save()).ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.filePath).toBe(file);
+    expect(calls[0]!.bytes.toString('utf8')).toContain('<p>hi</p>'); // pre-edit bytes
+
+    // Second save of the same session: backupDone gates a repeat.
+    dm.currentDoc!.journal.push({ type: 'editText', id: pId(dm.currentDoc!), html: 'AGAIN' });
+    expect((await dm.save()).ok).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('setBackupEnabled(false) suppresses the backup', async () => {
+    const dm = new DocumentManager(new PerfLog());
+    const { calls, writer } = makeWriter();
+    dm.setBackupWriter(writer);
+    dm.setBackupEnabled(false);
+    await openWithEdit(dm);
+    expect((await dm.save()).ok).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('no writer injected → save still succeeds, nothing backed up, no .bak next to the file', async () => {
     const dm = new DocumentManager(new PerfLog());
     const file = await openWithEdit(dm);
     expect((await dm.save()).ok).toBe(true);
-    const bak = await readFile(file + '.bak', 'utf8');
-    expect(bak).toContain('<p>hi</p>');
+    await expect(readFile(file + '.bak')).rejects.toThrow();
   });
 
-  it('setBackupEnabled(false) suppresses the .bak', async () => {
+  it('never writes a .bak next to the user file anymore', async () => {
     const dm = new DocumentManager(new PerfLog());
-    dm.setBackupEnabled(false);
+    const { writer } = makeWriter();
+    dm.setBackupWriter(writer);
     const file = await openWithEdit(dm);
     expect((await dm.save()).ok).toBe(true);
     await expect(readFile(file + '.bak')).rejects.toThrow();

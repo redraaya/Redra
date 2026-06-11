@@ -16,7 +16,7 @@ export interface OpenedDoc {
   dir: string;
   doc: RedraDoc;
   journal: Journal;
-  /** Raw bytes as read from disk at open time (verbatim source for ops-free saves and .bak). */
+  /** Raw bytes as read from disk at open time (verbatim source for ops-free saves and backups). */
   originalBytes: Buffer;
   /** Canonical encoding the file was decoded with. */
   encoding: string;
@@ -39,14 +39,22 @@ export interface OpenTimings {
 }
 
 /**
+ * Stores the ORIGINAL bytes of `filePath` somewhere safe before the first
+ * overwrite. Injected by main (wired to BackupStore in userData/backups)
+ * so this class stays Electron-free and the destination is testable.
+ */
+export type BackupWriter = (filePath: string, bytes: Buffer) => Promise<void>;
+
+/**
  * Owns the currently opened document (single-window v1: re-open replaces it).
  * All Electron-facing wiring (views, dialogs, IPC) lives in index.ts;
  * this class only touches fs + the engine, so it stays thin and portable.
  */
 export class DocumentManager {
   private current: OpenedDoc | null = null;
-  /** Create <name>.html.bak with the ORIGINAL bytes on first overwrite-save (user setting). */
+  /** Back up the ORIGINAL bytes on first overwrite-save (user setting). */
   private backupEnabled = true;
+  private backupWriter: BackupWriter | null = null;
 
   constructor(private readonly perf: PerfLog) {}
 
@@ -56,6 +64,10 @@ export class DocumentManager {
 
   setBackupEnabled(on: boolean): void {
     this.backupEnabled = on;
+  }
+
+  setBackupWriter(writer: BackupWriter | null): void {
+    this.backupWriter = writer;
   }
 
   /**
@@ -125,7 +137,7 @@ export class DocumentManager {
    * Save pipeline. `asPath` set ⇒ Save As.
    * - no ops + clean journal + same path ⇒ no-op, report ok (disk already verbatim)
    * - mtime conflict guard before overwriting
-   * - first overwrite-save of a session writes <name>.html.bak with original bytes
+   * - first overwrite-save of a session hands the original bytes to backupWriter
    * - atomic write: tmp file in the same dir + rename
    */
   async save(asPath?: string): Promise<SaveResult> {
@@ -155,8 +167,8 @@ export class DocumentManager {
     }
 
     try {
-      if (overwritesCurrent && this.backupEnabled && !cur.backupDone) {
-        await fs.writeFile(targetPath + '.bak', cur.originalBytes);
+      if (overwritesCurrent && this.backupEnabled && !cur.backupDone && this.backupWriter) {
+        await this.backupWriter(targetPath, cur.originalBytes);
         cur.backupDone = true;
       }
 
