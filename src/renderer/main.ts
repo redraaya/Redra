@@ -89,13 +89,22 @@ redra.onModeChanged((state) => {
 
 // --- drag-and-drop (whole window) ----------------------------------------------
 
-window.addEventListener('dragover', (e) => {
+// Enter/leave counter: dragleave fires on every child boundary, so a bare
+// listener makes the highlight flicker while moving over the start screen.
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => {
   e.preventDefault();
+  dragDepth++;
   document.body.classList.add('drag-over');
 });
-window.addEventListener('dragleave', () => document.body.classList.remove('drag-over'));
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) document.body.classList.remove('drag-over');
+});
 window.addEventListener('drop', (e) => {
   e.preventDefault();
+  dragDepth = 0;
   document.body.classList.remove('drag-over');
   const file = e.dataTransfer?.files[0];
   if (!file || !/\.html?$/i.test(file.name)) return;

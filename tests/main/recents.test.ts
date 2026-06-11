@@ -1,5 +1,9 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MAX_RECENTS, addRecent, sanitizeRecents, sanitizeTimes } from '../../src/main/lib/recents.js';
+import { RecentsStore } from '../../src/main/recents-store.js';
 
 describe('addRecent', () => {
   it('prepends new entries (most-recent-first)', () => {
@@ -31,6 +35,39 @@ describe('sanitizeRecents', () => {
   it('caps oversized stored lists', () => {
     const big = Array.from({ length: 30 }, (_, i) => `/f${i}`);
     expect(sanitizeRecents(big)).toHaveLength(MAX_RECENTS);
+  });
+});
+
+describe('RecentsStore legacy format', () => {
+  it('loads a pre-Stage-4 bare string[] file and round-trips to {list, times}', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'redra-recents-'));
+    try {
+      const file = path.join(dir, 'recents.json');
+      await writeFile(file, JSON.stringify(['/a.html', '/b.html']));
+
+      const store = new RecentsStore(file);
+      await store.load();
+      // Legacy entries come back without openedAt.
+      expect(store.get()).toEqual([{ path: '/a.html' }, { path: '/b.html' }]);
+
+      await store.add('/c.html', 12_345);
+      const raw: unknown = JSON.parse(await readFile(file, 'utf8'));
+      expect(raw).toEqual({
+        list: ['/c.html', '/a.html', '/b.html'],
+        times: { '/c.html': 12_345 },
+      });
+
+      // The new format round-trips through a fresh store.
+      const reloaded = new RecentsStore(file);
+      await reloaded.load();
+      expect(reloaded.get()).toEqual([
+        { path: '/c.html', openedAt: 12_345 },
+        { path: '/a.html' },
+        { path: '/b.html' },
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

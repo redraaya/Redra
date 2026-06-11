@@ -14,6 +14,7 @@ import { EDITOR_CSS } from './editor-css.js';
 import { writeAtomic } from './lib/atomic-write.js';
 import { PerfLog } from './lib/perf.js';
 import { senderMatches } from './lib/sender.js';
+import { DEFAULT_SETTINGS } from './lib/settings.js';
 import { tildify } from './lib/tildify.js';
 import { validateOp } from './lib/validate-op.js';
 import { guardDocPush } from './lib/op-guard.js';
@@ -310,6 +311,24 @@ function layoutDocView(): void {
 }
 
 /**
+ * Shared «Сохранить изменения в «<name>»?» dialog (close guard + open-over-
+ * dirty). Returns the user's choice; the caller decides what «save» means.
+ */
+async function askUnsavedChanges(
+  w: BrowserWindow,
+  name: string,
+): Promise<'save' | 'discard' | 'cancel'> {
+  const { response } = await dialog.showMessageBox(w, {
+    type: 'warning',
+    message: `Сохранить изменения в «${name}»?`,
+    buttons: ['Сохранить', 'Не сохранять', 'Отмена'],
+    defaultId: 0,
+    cancelId: 2,
+  });
+  return response === 0 ? 'save' : response === 1 ? 'discard' : 'cancel';
+}
+
+/**
  * Close guard: commit any in-flight edit, then — if the journal is dirty —
  * ask «Сохранить / Не сохранять / Отмена». destroy() bypasses 'close', so the
  * approved path cannot re-trigger the guard.
@@ -324,19 +343,12 @@ async function handleCloseRequest(w: BrowserWindow): Promise<void> {
       destroyed = true;
       return;
     }
-    const name = path.basename(cur.filePath);
-    const { response } = await dialog.showMessageBox(w, {
-      type: 'warning',
-      message: `Сохранить изменения в «${name}»?`,
-      buttons: ['Сохранить', 'Не сохранять', 'Отмена'],
-      defaultId: 0,
-      cancelId: 2,
-    });
-    if (response === 0) {
-      const saved = await doSave(false);
+    const choice = await askUnsavedChanges(w, path.basename(cur.filePath));
+    if (choice === 'save') {
+      const saved = await doSave(false, { fromCloseFlow: true });
       // Save failed or was canceled (e.g. conflict «Отмена») — keep the window.
       destroyed = saved.ok;
-    } else if (response === 1) {
+    } else if (choice === 'discard') {
       destroyed = true;
     }
   } finally {
@@ -435,6 +447,26 @@ function smokeOpsRoundtrip(): void {
 // --- open / save flows -----------------------------------------------------
 
 async function openDocument(filePath: string): Promise<OpenResult> {
+  // Menu accelerators must not interleave with the close-guard dialog.
+  if (closeFlowActive) return { ok: false, canceled: true };
+
+  // Opening over a dirty document would silently drop its edits — same
+  // three-button guard as window close. Smoke runs never open over dirty,
+  // but keep them dialog-free by construction.
+  if (!SMOKE && win && docManager.currentDoc) {
+    // In-flight typed text counts as unsaved — commit it into the journal first.
+    await commitActiveEdit();
+    const cur = docManager.currentDoc;
+    if (cur && cur.journal.dirty) {
+      const choice = await askUnsavedChanges(win, path.basename(cur.filePath));
+      if (choice === 'cancel') return { ok: false, canceled: true };
+      if (choice === 'save') {
+        const saved = await doSave(false);
+        if (!saved.ok) return { ok: false, canceled: true };
+      }
+    }
+  }
+
   const t0 = performance.now();
   try {
     const { opened, timings } = await docManager.open(filePath);
@@ -491,7 +523,10 @@ async function openViaDialog(): Promise<OpenResult> {
   return openDocument(first);
 }
 
-async function doSave(saveAs: boolean): Promise<SaveResult> {
+async function doSave(saveAs: boolean, opts?: { fromCloseFlow?: boolean }): Promise<SaveResult> {
+  // Menu accelerators must not interleave with the close-guard dialog —
+  // except the save the close flow itself requested.
+  if (closeFlowActive && !opts?.fromCloseFlow) return { ok: false, canceled: true };
   const cur = docManager.currentDoc;
   if (!cur) return { ok: false, error: 'Документ не открыт' };
 
@@ -512,7 +547,10 @@ async function doSave(saveAs: boolean): Promise<SaveResult> {
   let saved = await docManager.save(asPath);
 
   // mtime conflict: someone changed the file on disk since open/last save.
-  if (!saved.ok && saved.conflict) {
+  // Loop: the file can change AGAIN between «Перезаписать» and the retry —
+  // re-ask instead of falling into the generic-error branch. Bounded so a
+  // pathological writer cannot trap the user in the dialog forever.
+  for (let attempt = 0; !saved.ok && saved.conflict && attempt < 3; attempt++) {
     if (SMOKE || !win) {
       console.warn('[save] conflict: file on disk changed since open/last save');
       return saved;
@@ -528,6 +566,10 @@ async function doSave(saveAs: boolean): Promise<SaveResult> {
     if (response !== 0) return { ok: false, canceled: true };
     await docManager.acceptExternalMtime();
     saved = await docManager.save(asPath);
+  }
+  if (!saved.ok && saved.conflict) {
+    // 3 conflicts in a row — surface a real message, not «неизвестная ошибка».
+    saved = { ok: false, error: 'Файл на диске продолжает меняться — сохранение прервано' };
   }
 
   if (saved.ok) {
@@ -632,7 +674,7 @@ function registerIpc(): void {
     }));
   });
   ipcMain.handle('settings:get', (event) =>
-    fromShell(event) ? settingsStore.get() : ({ shellTheme: 'system', backupOnFirstSave: true } satisfies Settings),
+    fromShell(event) ? settingsStore.get() : ({ ...DEFAULT_SETTINGS } satisfies Settings),
   );
   ipcMain.handle('settings:set', (event, patch: unknown) => {
     if (!fromShell(event)) return settingsStore.get();

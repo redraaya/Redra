@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { writeAtomic } from './lib/atomic-write.js';
 import { addRecent, sanitizeRecents, sanitizeTimes } from './lib/recents.js';
 
 /**
@@ -43,7 +44,7 @@ export class RecentsStore {
     this.times = sanitizeTimes(this.times, this.list); // prune entries that fell off
     try {
       await fs.mkdir(path.dirname(this.file), { recursive: true });
-      await fs.writeFile(this.file, JSON.stringify({ list: this.list, times: this.times }, null, 2));
+      await writeAtomic(this.file, JSON.stringify({ list: this.list, times: this.times }, null, 2));
     } catch (err) {
       console.warn('[recents] failed to persist:', err);
     }
