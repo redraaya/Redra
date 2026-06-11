@@ -12,10 +12,18 @@ import { createEditorController } from './editor/controller.js';
 import type { EditorController } from './editor/controller.js';
 import type { ModeState, OpPushResult, OpUndoResult, RedraDocBridge } from '../shared/ipc.js';
 
+// The doc view WebContents is REUSED across documents, but this preload
+// re-runs per navigation — so the docId baked into the page URL
+// (redra://doc/<docId>/) identifies WHICH document this editing layer
+// belongs to. Every ops call carries it; main rejects on mismatch, so an
+// in-flight push from a previous document can never corrupt the journal of
+// the next one (stamp ids like "r5" exist in every document).
+const docId = window.location.pathname.split('/').filter(Boolean)[0] ?? '';
+
 const bridge: RedraDocBridge = {
-  pushOp: (op) => ipcRenderer.invoke('ops:push', op) as Promise<OpPushResult>,
-  undo: () => ipcRenderer.invoke('ops:undo') as Promise<OpUndoResult>,
-  redo: () => ipcRenderer.invoke('ops:redo') as Promise<OpUndoResult>,
+  pushOp: (op) => ipcRenderer.invoke('ops:push', docId, op) as Promise<OpPushResult>,
+  undo: () => ipcRenderer.invoke('ops:undo', docId) as Promise<OpUndoResult>,
+  redo: () => ipcRenderer.invoke('ops:redo', docId) as Promise<OpUndoResult>,
   openExternal: (url) => {
     void ipcRenderer.invoke('link:openExternal', url);
   },

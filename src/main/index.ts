@@ -11,6 +11,7 @@ import { EDITOR_CSS } from './editor-css.js';
 import { PerfLog } from './lib/perf.js';
 import { senderMatches } from './lib/sender.js';
 import { validateOp } from './lib/validate-op.js';
+import { guardDocPush } from './lib/op-guard.js';
 import type { OpPushResult, OpUndoResult, OpenResult, SaveResult } from '../shared/ipc.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -270,8 +271,13 @@ function setPreview(on: boolean): void {
 
 /**
  * Ask the doc preload to commit any active edit session and wait for the
- * ack (nonce on 'edit:committed'), at most 300ms — if the view is gone or
+ * ack (nonce on 'edit:committed'), at most 1000ms — if the view is gone or
  * unresponsive we proceed anyway rather than wedging the save flow.
+ *
+ * Ordering invariant: doc→main IPC from one WebContents is delivered in
+ * send order, so by the time the 'edit:committed' ack arrives, every
+ * ops:push the commit produced has already been received and journaled —
+ * the ack doubles as an ordering barrier for in-flight ops:push.
  */
 function commitActiveEdit(): Promise<void> {
   const wc = docView?.webContents;
@@ -287,7 +293,10 @@ function commitActiveEdit(): Promise<void> {
       if (!senderMatches(event, wc) || replyNonce !== nonce) return;
       done();
     };
-    const timer = setTimeout(done, 300);
+    const timer = setTimeout(() => {
+      console.warn('[edit] commit ack timed out — proceeding without it');
+      done();
+    }, 1000);
     ipcMain.on('edit:committed', onReply);
     wc.send('edit:commit', nonce);
   });
@@ -403,6 +412,12 @@ async function doSave(saveAs: boolean): Promise<SaveResult> {
   } else if (saved.conflict) {
     // Placeholder until the real dialog in Stage 4.
     console.warn('[save] conflict: file on disk changed since open/last save');
+  } else if (!saved.canceled) {
+    // Generic failure (apply/serialize/write) — must never be silent.
+    const message = saved.error ?? 'неизвестная ошибка';
+    console.error('[save] failed:', message);
+    if (SMOKE) app.exit(1);
+    else dialog.showErrorBox('Не удалось сохранить', message);
   }
   return saved;
 }
@@ -444,11 +459,14 @@ function registerIpc(): void {
   ipcMain.handle('perf:get', (event) => (fromShell(event) ? perf.all() : []));
 
   // --- doc-view channels (Stage 3 editing bridge) ---
-  ipcMain.handle('ops:push', (event, raw: unknown): OpPushResult => {
+  // Every ops call carries the docId baked into the sender's URL: the doc
+  // view WebContents is reused across documents, so an in-flight invoke from
+  // document A must never land in document B's journal (see guardDocPush).
+  ipcMain.handle('ops:push', (event, docId: unknown, raw: unknown): OpPushResult => {
     if (!fromDoc(event)) return { ok: false, error: 'bad sender' };
     const cur = docManager.currentDoc;
     if (!cur) return { ok: false, error: 'no document' };
-    const checked = validateOp(raw, cur.doc);
+    const checked = guardDocPush(docId, raw, cur.docId, cur.doc, cur.journal.ops);
     if (!checked.ok) {
       console.error('[ops] rejected push:', checked.error);
       return { ok: false, error: checked.error };
@@ -457,18 +475,18 @@ function registerIpc(): void {
     broadcastDirty();
     return { ok: true };
   });
-  ipcMain.handle('ops:undo', (event): OpUndoResult => {
+  ipcMain.handle('ops:undo', (event, docId: unknown): OpUndoResult => {
     if (!fromDoc(event)) return { ok: false, dirty: false };
     const cur = docManager.currentDoc;
-    if (!cur) return { ok: false, dirty: false };
+    if (!cur || docId !== cur.docId) return { ok: false, dirty: cur?.journal.dirty ?? false };
     const ok = cur.journal.undo();
     broadcastDirty();
     return { ok, dirty: cur.journal.dirty };
   });
-  ipcMain.handle('ops:redo', (event): OpUndoResult => {
+  ipcMain.handle('ops:redo', (event, docId: unknown): OpUndoResult => {
     if (!fromDoc(event)) return { ok: false, dirty: false };
     const cur = docManager.currentDoc;
-    if (!cur) return { ok: false, dirty: false };
+    if (!cur || docId !== cur.docId) return { ok: false, dirty: cur?.journal.dirty ?? false };
     const ok = cur.journal.redo();
     broadcastDirty();
     return { ok, dirty: cur.journal.dirty };
