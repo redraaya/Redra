@@ -1,9 +1,12 @@
-import { parseFragment, serialize } from 'parse5';
+import { defaultTreeAdapter, parseFragment, serialize } from 'parse5';
+import type { DefaultTreeAdapterMap } from 'parse5';
 import { DROPPED_TAGS, isSafeHref, KEPT_TAGS } from './normalize.js';
-import { isTemplate, walkElements } from './parse.js';
-import { REDRA_ID_ATTR, type Element, type ParentNode, type RedraDoc } from './types.js';
+import { isTemplate, parseDocument, walkElements } from './parse.js';
+import { REDRA_ID_ATTR, type Element, type ParentNode, type RedraDoc, type Template } from './types.js';
 
 type ChildNode = ParentNode['childNodes'][number];
+type TextNode = DefaultTreeAdapterMap['textNode'];
+type CommentNode = DefaultTreeAdapterMap['commentNode'];
 
 function isElementNode(node: ChildNode): node is Element {
   return 'tagName' in node;
@@ -150,9 +153,74 @@ export type MoveBlockOp = { type: 'moveBlock'; id: string; beforeId: string | nu
  * can never smuggle surprise attributes (onerror, style, …) into the file.
  */
 export type SetAttrOp = { type: 'setAttr'; id: string; name: string; value: string };
+/**
+ * Deep-clone element `id` (attrs, children, template content) and insert the
+ * clone immediately AFTER the original among its siblings. `cloneId` is
+ * minted by MAIN (format "c<number>", unique per document); the clone's root
+ * gets `cloneId` and every descendant element gets `${cloneId}-${n}` in
+ * walkElements order — registered in the working tree's id maps so
+ * SUBSEQUENT ops (editText/deleteBlock/moveBlock/setAttr and the provenance
+ * gate's stamp lookups) resolve cloned elements like any others. The ids
+ * never appear as attributes in serialized output.
+ */
+export type CloneBlockOp = { type: 'cloneBlock'; id: string; cloneId: string };
 
 /** A recorded edit. Plain JSON data — safe to send over IPC and persist. */
-export type Op = EditTextOp | DeleteBlockOp | MoveBlockOp | SetAttrOp;
+export type Op = EditTextOp | DeleteBlockOp | MoveBlockOp | SetAttrOp | CloneBlockOp;
+
+/** The only cloneId shape applyOps accepts — disjoint from parseDocument's "rN". */
+const CLONE_ID_RE = /^c\d+$/;
+
+/**
+ * "c7" → "c7", "c7-12" → "c7", anything else → null. The single definition
+ * of what a minted clone id looks like — main's op-guard derives its
+ * "accept by prefix" rule from this, the engine validates roots with it.
+ */
+export function cloneRootOf(id: string): string | null {
+  const m = /^(c\d+)(?:-\d+)?$/.exec(id);
+  return m ? m[1]! : null;
+}
+
+/**
+ * Deep manual clone of a parse5 subtree: attributes, children and template
+ * content. Built with defaultTreeAdapter so node shapes match the parser's
+ * exactly; parentNode links are wired by appendChild, sourceCodeLocation is
+ * deliberately absent (the clone has no source).
+ */
+function cloneSubtree(node: ChildNode): ChildNode {
+  if (isElementNode(node)) {
+    const copy = defaultTreeAdapter.createElement(
+      node.tagName,
+      node.namespaceURI,
+      node.attrs.map((a) => ({ ...a })),
+    );
+    if (isTemplate(node)) {
+      const content = defaultTreeAdapter.createDocumentFragment();
+      defaultTreeAdapter.setTemplateContent(copy as Template, content);
+      for (const child of node.content.childNodes) {
+        defaultTreeAdapter.appendChild(content, cloneSubtree(child));
+      }
+    }
+    for (const child of node.childNodes) {
+      defaultTreeAdapter.appendChild(copy, cloneSubtree(child));
+    }
+    return copy;
+  }
+  if (node.nodeName === '#text') {
+    const text: TextNode = { nodeName: '#text', value: (node as TextNode).value, parentNode: null };
+    return text;
+  }
+  if (node.nodeName === '#comment') {
+    const comment: CommentNode = {
+      nodeName: '#comment',
+      data: (node as CommentNode).data,
+      parentNode: null,
+    };
+    return comment;
+  }
+  // #documentType cannot occur inside an element subtree; shallow-copy defensively.
+  return { ...node, parentNode: null };
+}
 
 /**
  * Engine-level whitelist of attribute names setAttr may touch. Deliberately
@@ -162,6 +230,29 @@ export type Op = EditTextOp | DeleteBlockOp | MoveBlockOp | SetAttrOp;
  * @internal
  */
 export const SETATTR_ALLOWED_NAMES: ReadonlySet<string> = new Set(['src']);
+
+/**
+ * DRY-RUN: would `ops` apply cleanly to this document? Re-parses the pristine
+ * source into a throwaway tree (exactly what serializeSource does at save
+ * time, minus the serialization) and applies the ops to it — the pristine
+ * `doc` is never touched. Main's op-guard uses this for the clone-id residue
+ * cases its cheap prefix rules cannot express, so a push the guard accepts is
+ * BY CONSTRUCTION a push the save will accept.
+ *
+ * @internal
+ */
+export function tryApplyOps(
+  doc: RedraDoc,
+  ops: readonly Op[],
+): { ok: true } | { ok: false; error: string } {
+  const work = parseDocument(doc.source);
+  try {
+    applyOps(work, ops);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 /** Thrown when an operation cannot be applied to the document. */
 export class RedraOpError extends Error {
@@ -277,6 +368,43 @@ export function applyOps(doc: RedraDoc, ops: readonly Op[]): void {
         const attr = el.attrs.find((a) => a.name === op.name);
         if (attr) attr.value = op.value;
         else el.attrs.push({ name: op.name, value: op.value });
+        break;
+      }
+      case 'cloneBlock': {
+        if (!CLONE_ID_RE.test(op.cloneId)) {
+          throw new RedraOpError(op, `invalid cloneId "${op.cloneId}" (expected "c<number>")`);
+        }
+        // Uniqueness against the doc's id map — which already contains the
+        // ids registered by previously applied cloneBlocks.
+        if (doc.idToNode.has(op.cloneId)) {
+          throw new RedraOpError(op, `cloneId "${op.cloneId}" is already in use`);
+        }
+        const el = resolve(op, op.id, 'element');
+        const parent = el.parentNode;
+        if (!parent) {
+          throw new RedraOpError(op, `element "${op.id}" has no parent to insert the clone into`);
+        }
+        const copy = cloneSubtree(el) as Element;
+        parent.childNodes.splice(parent.childNodes.indexOf(el) + 1, 0, copy);
+        copy.parentNode = parent;
+        // Register clone ids: root = cloneId, every descendant element =
+        // `${cloneId}-${n}` in the SAME deterministic walk order as
+        // walkElements (template content before children), so main and the
+        // engine derive identical ids without ever exchanging them. The
+        // maps are mutated — applyOps only ever runs on throwaway clones of
+        // the pristine doc (see serializeSource).
+        const idToNode = doc.idToNode as Map<string, Element>;
+        const nodeToId = doc.nodeToId as Map<Element, string>;
+        idToNode.set(op.cloneId, copy);
+        nodeToId.set(copy, op.cloneId);
+        let n = 0;
+        const register = (d: Element): void => {
+          const id = `${op.cloneId}-${++n}`;
+          idToNode.set(id, d);
+          nodeToId.set(d, id);
+        };
+        if (isTemplate(copy)) walkElements(copy.content, register);
+        walkElements(copy, register);
         break;
       }
     }

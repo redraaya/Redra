@@ -3,6 +3,7 @@ import type {
   DirtyState,
   DocOpenedInfo,
   ExportResult,
+  FindResult,
   ModeState,
   NoticeInfo,
   OpenResult,
@@ -22,6 +23,15 @@ const api: RedraShellApi = {
   saveAs: () => ipcRenderer.invoke('doc:saveAs') as Promise<SaveResult>,
   exportPdf: () => ipcRenderer.invoke('doc:exportPdf') as Promise<ExportResult>,
   togglePreview: () => ipcRenderer.send('mode:toggle'),
+  findStart: (text: string) => ipcRenderer.send('find:start', text),
+  findNext: (text: string, forward: boolean) => ipcRenderer.send('find:next', text, forward),
+  findStop: () => ipcRenderer.send('find:stop'),
+  onFindOpen: (cb: () => void) => {
+    ipcRenderer.on('find:open', () => cb());
+  },
+  onFindResult: (cb: (result: FindResult) => void) => {
+    ipcRenderer.on('find:result', (_event, result: FindResult) => cb(result));
+  },
   getRecents: () => ipcRenderer.invoke('recents:get') as Promise<RecentEntry[]>,
   getSettings: () => ipcRenderer.invoke('settings:get') as Promise<Settings>,
   setSettings: (patch: Partial<Settings>) =>

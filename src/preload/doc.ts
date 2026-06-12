@@ -11,6 +11,7 @@ import { ipcRenderer, webUtils } from 'electron';
 import { createEditorController } from './editor/controller.js';
 import type { EditorController } from './editor/controller.js';
 import type {
+  CloneBlockResult,
   ImageValueResult,
   ModeState,
   OpPushResult,
@@ -28,6 +29,7 @@ const docId = window.location.pathname.split('/').filter(Boolean)[0] ?? '';
 
 const bridge: RedraDocBridge = {
   pushOp: (op) => ipcRenderer.invoke('ops:push', docId, op) as Promise<OpPushResult>,
+  cloneBlock: (id) => ipcRenderer.invoke('ops:cloneBlock', docId, id) as Promise<CloneBlockResult>,
   undo: () => ipcRenderer.invoke('ops:undo', docId) as Promise<OpUndoResult>,
   redo: () => ipcRenderer.invoke('ops:redo', docId) as Promise<OpUndoResult>,
   openExternal: (url) => {

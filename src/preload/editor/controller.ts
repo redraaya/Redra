@@ -49,6 +49,7 @@ export function createEditorController(
 
   const overlay = new Overlay(doc, {
     onDelete: () => deleteHoveredBlock(),
+    onDuplicate: () => duplicateHoveredBlock(),
     onGripDown: (e) => {
       const block = overlay.currentBlock;
       if (!block || dragging || session) return;
@@ -341,6 +342,51 @@ export function createEditorController(
     hoverBlock = block;
     block.classList.add('redra-hover');
     overlay.showHandle(block);
+  }
+
+  /**
+   * Block duplication: unlike other ops the journal push happens in MAIN
+   * inside the one 'ops:cloneBlock' invoke (it mints the cloneId), so the
+   * DOM changes only AFTER main confirmed — no rollback path needed. The
+   * returned fragment is STAMPED (cloneId / cloneId-n), so hover, edit,
+   * drag and delete work on the copy immediately.
+   */
+  function duplicateHoveredBlock(): void {
+    const block = overlay.currentBlock;
+    if (!block || session || dragging) return;
+    const id = block.getAttribute(REDRA_ID_ATTR);
+    const parent = block.parentNode as (Node & ParentNode) | null;
+    if (!id || !parent) return;
+    void bridge.cloneBlock(id).then((res) => {
+      if (!res.ok) {
+        console.error('[redra] ops:cloneBlock rejected:', res.error);
+        if (res.userMessage) bridge.notifyRejected(res.userMessage);
+        return;
+      }
+      // The block may have left the DOM while the invoke was in flight
+      // (page script), or the fragment may fail to materialize. Main has
+      // ALREADY journaled the op inside the invoke — without a matching
+      // LocalHistory entry the journal and the local stack would skew
+      // forever (every later ⌘Z would undo the wrong op). The clone op is
+      // top-of-journal at this point, so one bridge.undo() rolls it back.
+      const undoJournaledClone = (why: string): void => {
+        console.warn(`[redra] cloneBlock: ${why} — undoing the journaled op`);
+        void bridge.undo().then((r) => {
+          if (!r.ok) console.error('[redra] cloneBlock rollback desync: journal had nothing to undo');
+        });
+      };
+      if (!block.isConnected) {
+        undoJournaledClone('block left the DOM mid-invoke');
+        return;
+      }
+      block.insertAdjacentHTML('afterend', res.html);
+      const inserted = block.nextElementSibling;
+      if (!inserted || inserted.getAttribute(REDRA_ID_ATTR) !== res.cloneId) {
+        undoJournaledClone('inserted fragment did not materialize as the stamped clone');
+        return;
+      }
+      history.push({ kind: 'cloneBlock', node: inserted, parent, nextSibling: inserted.nextSibling });
+    });
   }
 
   function deleteHoveredBlock(): void {

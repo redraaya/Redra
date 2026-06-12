@@ -8,10 +8,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerRedraScheme, installRedraProtocolHandler } from './protocol.js';
 import { DocumentManager } from './document-manager.js';
+import type { BackupWriter } from './document-manager.js';
 import { BackupStore } from './lib/backups.js';
 import { RecentsStore } from './recents-store.js';
 import { SettingsStore } from './settings-store.js';
-import { buildAppMenu, setBackupMenuChecked, setDocMenuEnabled } from './menu.js';
+import { buildAppMenu, setBackupMenuChecked } from './menu.js';
 import type { VersionMenuItem } from './menu.js';
 import { EDITOR_CSS } from './editor-css.js';
 import { PerfLog } from './lib/perf.js';
@@ -20,9 +21,9 @@ import { DEFAULT_SETTINGS } from './lib/settings.js';
 import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
-import { guardDocPush } from './lib/op-guard.js';
+import { guardCloneBlock, guardDocPush } from './lib/op-guard.js';
 import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
-import { getElementById } from '../engine/index.js';
+import { getElementById, renderCloneFragment } from '../engine/index.js';
 import {
   buildImageDataUri,
   IMAGE_EXTENSIONS,
@@ -32,7 +33,9 @@ import {
 import { createSaveFlow } from './save-flow.js';
 import { ScreenshotHarness } from './screenshot.js';
 import { SmokeHarness } from './smoke.js';
+import { ContextRegistry, WindowContext, chooseOpenTarget, isFreeForOpen } from './window-context.js';
 import type {
+  CloneBlockResult,
   ExportResult,
   ImageValueResult,
   OpPushResult,
@@ -41,6 +44,7 @@ import type {
   RecentEntry,
   SaveResult,
   Settings,
+  UpdateInfo,
 } from '../shared/ipc.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -71,29 +75,37 @@ app.commandLine.appendSwitch('password-store', 'basic'); // harmless; covers a f
 registerRedraScheme();
 
 const perf = new PerfLog();
-const docManager = new DocumentManager(perf);
-const smoke = new SmokeHarness(SMOKE, perf, docManager);
+/** One window = one document: every live window has a WindowContext here. */
+const registry = new ContextRegistry<WindowContext>();
+const smoke = new SmokeHarness(
+  SMOKE,
+  perf,
+  // Smoke runs drive a single window — the first (only) context's document.
+  () => registry.all()[0]?.docManager.currentDoc ?? null,
+);
 const shot = new ScreenshotHarness(shotPath);
 let recents: RecentsStore;
 let settingsStore: SettingsStore;
-/** In-memory session shared by the shell window and the doc view (no disk state, no keychain). */
+/** In-memory session shared by all shell windows and doc views (no disk state, no keychain). */
 let appSession: Session | null = null;
 /** Central session backups folder (userData/backups) — set in onReady. */
 let backupsDir = '';
 let backupStore: BackupStore | null = null;
+/** Wired to BackupStore in onReady; every per-window DocumentManager gets it. */
+let backupWriter: BackupWriter | null = null;
 /** Prune budget: newest versions kept per document / store-wide. */
 const BACKUPS_KEEP_PER_FILE = 10;
 const BACKUPS_KEEP_GLOBAL = 100;
 /** "Version History" shows at most this many entries. */
 const VERSION_MENU_MAX = 10;
 
-let win: BrowserWindow | null = null;
-let docView: WebContentsView | null = null;
 let pendingOpenPath: string | null = cliFile ? path.resolve(cliFile) : null;
-/** Preview state — single source of truth lives here in main. */
-let previewOn = false;
 /** Set on before-quit so a confirmed close can resume the aborted Cmd+Q. */
 let quitRequested = false;
+/** 'ready-to-window-shown' is a startup metric — recorded for the FIRST window only. */
+let firstWindowShown = false;
+/** Last update-check result — replayed to windows created after the check. */
+let pendingUpdate: UpdateInfo | null = null;
 /**
  * UI language: RU on Russian systems, EN otherwise (no override). The real
  * locale is only known after 'ready' — onReady swaps in the right table
@@ -101,28 +113,88 @@ let quitRequested = false;
  */
 let t = makeT('en');
 
-/** Handlers shared by every (re)build of the application menu. */
-const menuHandlers = {
-  open: () => void openViaDialog(),
-  save: () => void saveFlow.doSave(false),
-  saveAs: () => void saveFlow.doSave(true),
-  exportPdf: () => void saveFlow.exportPdf(),
-  undo: () => docView?.webContents.send('edit:undo'),
-  redo: () => docView?.webContents.send('edit:redo'),
-  togglePreview: (checked: boolean) => setPreview(checked),
-  toggleBackup: (checked: boolean) => void applySettings({ backupOnFirstSave: checked }),
-  showBackups: () => void showBackupsFolder(),
-  restoreVersion: (v: VersionMenuItem) => void restoreVersion(v),
-};
+// --- context helpers -----------------------------------------------------
+
+/** The context the app menu acts on: the focused window's, if it is ours. */
+function focusedCtx(): WindowContext | null {
+  const focused = BrowserWindow.getFocusedWindow();
+  return focused ? registry.byShellWcId(focused.webContents.id) : null;
+}
+
+/** Resolve a shell-channel IPC sender to its window context (null = reject). */
+function shellCtx(event: IpcMainInvokeEvent | IpcMainEvent): WindowContext | null {
+  return registry.byShellWcId(event.sender.id);
+}
+
+/** Resolve a doc-channel IPC sender to its window context (null = reject). */
+function docCtx(event: IpcMainInvokeEvent | IpcMainEvent): WindowContext | null {
+  return registry.byDocWcId(event.sender.id);
+}
 
 /**
- * (Re)build the whole application menu. Electron menus are static once set,
- * and "Version History" is data-driven — so the menu is rebuilt on startup,
- * on every document open/close and after every backup write. Cheap: a
- * readdir + template build.
+ * Send to a context's SHELL renderer. A window created to host an open may
+ * still be loading its shell page — the events that establish the doc state
+ * (doc:opened, dirty, mode) must not be lost, so they are deferred to
+ * did-finish-load (once-listeners fire in registration order, so the event
+ * order is preserved).
+ */
+function sendToShell(ctx: WindowContext, channel: string, payload: unknown): void {
+  if (ctx.win.isDestroyed()) return;
+  const wc = ctx.win.webContents;
+  if (wc.isDestroyed()) return;
+  if (wc.isLoading()) {
+    wc.once('did-finish-load', () => {
+      if (!wc.isDestroyed()) wc.send(channel, payload);
+    });
+  } else {
+    wc.send(channel, payload);
+  }
+}
+
+/** Handlers shared by every (re)build of the application menu. All doc-bound
+ * actions resolve the FOCUSED window's context at click time. */
+const menuHandlers = {
+  newWindow: () => {
+    createWindowContext();
+  },
+  open: () => void openViaDialog(),
+  save: () => void focusedCtx()?.saveFlow.doSave(false),
+  saveAs: () => void focusedCtx()?.saveFlow.doSave(true),
+  exportPdf: () => void focusedCtx()?.saveFlow.exportPdf(),
+  undo: () => focusedCtx()?.docView?.webContents.send('edit:undo'),
+  redo: () => focusedCtx()?.docView?.webContents.send('edit:redo'),
+  find: () => {
+    const ctx = focusedCtx();
+    if (ctx?.docManager.currentDoc) sendToShell(ctx, 'find:open', {});
+  },
+  togglePreview: (checked: boolean) => {
+    const ctx = focusedCtx();
+    if (ctx) setPreview(ctx, checked);
+  },
+  toggleBackup: (checked: boolean) => void applySettings({ backupOnFirstSave: checked }),
+  showBackups: () => void showBackupsFolder(),
+  restoreVersion: (v: VersionMenuItem) => {
+    const ctx = focusedCtx();
+    if (ctx) void restoreVersion(ctx, v);
+  },
+};
+
+/** Monotonic token: rapid focus switches start overlapping rebuilds, and the
+ * slowest readdir must not install a menu for a window no longer focused. */
+let menuRebuildSeq = 0;
+
+/**
+ * (Re)build the whole application menu for the FOCUSED window's state.
+ * Electron menus are static once set, and "Version History" is data-driven —
+ * so the menu is rebuilt on startup, on focus changes, on document open/
+ * close and after every backup write. Cheap: a readdir + template build.
  */
 async function rebuildAppMenu(): Promise<void> {
-  const cur = docManager.currentDoc;
+  const token = ++menuRebuildSeq;
+  // Startup fallback: the first window may not be focused yet (it shows
+  // asynchronously) — with exactly one window there is no ambiguity.
+  const ctx = focusedCtx() ?? (registry.size === 1 ? registry.all()[0]! : null);
+  const cur = ctx?.docManager.currentDoc ?? null;
   let versions: VersionMenuItem[] = [];
   if (cur && backupStore) {
     const entries = await backupStore.list(cur.filePath).catch(() => []);
@@ -134,11 +206,14 @@ async function rebuildAppMenu(): Promise<void> {
       return { label: `${dateLabel} · ${kb} ${t('unit.kb')}`, dateLabel, backupPath: e.path };
     });
   }
+  // A newer rebuild raced past this one while the backup list was awaited —
+  // its state is fresher; installing ours would clobber it.
+  if (token !== menuRebuildSeq) return;
   buildAppMenu(menuHandlers, {
     backupChecked: settingsStore.get().backupOnFirstSave,
     t,
     docOpen: !!cur,
-    previewChecked: previewOn,
+    previewChecked: ctx?.previewOn ?? false,
     versions,
   });
 }
@@ -148,29 +223,32 @@ async function rebuildAppMenu(): Promise<void> {
  * disk state (inside openFromBackup), swap the document content to the
  * chosen version and reload the view. The file on disk is untouched until
  * the user saves — the shell shows the dirty dot, ⌘S writes the restored
- * bytes.
+ * bytes. `ctx` is the context that was focused at click time — the dialogs
+ * below stay parented to ITS window even if focus moves meanwhile.
  */
-async function restoreVersion(v: VersionMenuItem): Promise<void> {
-  const w = win;
-  if (!docManager.currentDoc || !w) return;
-  // Captured BEFORE any await: the dialogs below keep the menu/window alive,
-  // so the user can open a DIFFERENT document mid-flow — document A's backup
-  // must never be restored over document B (see the re-check further down).
-  const expectedDocId = docManager.currentDoc.docId;
+async function restoreVersion(ctx: WindowContext, v: VersionMenuItem): Promise<void> {
+  const w = ctx.win;
+  const dm = ctx.docManager;
+  if (!dm.currentDoc || w.isDestroyed()) return;
+  // Captured BEFORE any await: the dialogs below keep the window alive, so
+  // the document could in principle change mid-flow (version restore) —
+  // document A's backup must never be restored over document B.
+  const expectedDocId = dm.currentDoc.docId;
   // Menu entries are ours, but never read a restore source from outside the store.
   if (!path.resolve(v.backupPath).startsWith(backupsDir + path.sep)) return;
-  await commitActiveEdit();
+  await commitActiveEdit(ctx);
   // openFromBackup snapshots only the DISK bytes — unsaved journal ops would
-  // be discarded silently. Same three-button guard as window close / open-
-  // over-dirty; the restore confirm below still answers its own question.
-  const cur = docManager.currentDoc;
+  // be discarded silently. Same three-button guard as window close; the
+  // restore confirm below still answers its own question.
+  const cur = dm.currentDoc;
   if (!cur) return;
   const proceed = await resolveUnsavedBeforeRestore({
     journalDirty: cur.journal.dirty,
-    askUnsavedChanges: () => saveFlow.askUnsavedChanges(w, path.basename(cur.filePath)),
-    save: () => saveFlow.doSave(false),
+    askUnsavedChanges: () => ctx.saveFlow.askUnsavedChanges(w, path.basename(cur.filePath)),
+    save: () => ctx.saveFlow.doSave(false),
   });
   if (!proceed) return;
+  if (w.isDestroyed()) return;
   const { response } = await dialog.showMessageBox(w, {
     type: 'warning',
     message: t('dialog.restore.message').replace('{date}', v.dateLabel),
@@ -180,17 +258,23 @@ async function restoreVersion(v: VersionMenuItem): Promise<void> {
     cancelId: 1,
   });
   if (response !== 0) return;
-  // Stale-document re-check: three dialogs were awaited above — if the user
-  // opened another document meanwhile, this restore belongs to a document
+  // Stale-document re-check: three dialogs were awaited above — if this
+  // window's document changed meanwhile, this restore belongs to a document
   // that is no longer current. Abort silently (the belt-and-braces check
   // inside openFromBackup would throw the same way).
-  if (docManager.currentDoc?.docId !== expectedDocId) return;
+  if (dm.currentDoc?.docId !== expectedDocId) return;
   try {
-    const { opened } = await docManager.openFromBackup(v.backupPath, expectedDocId);
-    const view = ensureDocView();
+    const { opened } = await dm.openFromBackup(v.backupPath, expectedDocId);
+    const view = ensureDocView(ctx);
     await view.webContents.loadURL(`redra://doc/${opened.docId}/`);
-    setPreview(false); // restored documents open in live editing, like any open
-    broadcastDirty();
+    setPreview(ctx, false); // restored documents open in live editing, like any open
+    // Same event as a fresh open: the shell re-syncs its doc state and resets
+    // transient UI (the find bar's stale counter included) for the new content.
+    sendToShell(ctx, 'doc:opened', {
+      path: opened.filePath,
+      name: path.basename(opened.filePath),
+    });
+    broadcastDirty(ctx);
     void rebuildAppMenu(); // the pre-restore snapshot just added a version
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -199,25 +283,12 @@ async function restoreVersion(v: VersionMenuItem): Promise<void> {
   }
 }
 
-// Save / export / close-guard flows live in save-flow.ts; index only wires.
-const saveFlow = createSaveFlow({
-  docManager,
-  perf,
-  smoke: SMOKE,
-  t: (key) => t(key), // forwards to the locale-resolved table (set in onReady)
-  getWin: () => win,
-  getDocView: () => docView,
-  commitActiveEdit,
-  isQuitRequested: () => quitRequested,
-  clearQuitRequested: () => {
-    quitRequested = false;
-  },
-});
-
 // macOS: dock / Finder "open with"
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
-  if (app.isReady() && win) {
+  // After 'ready' openDocument can always run — it creates a window itself
+  // when none is free (the session/protocol exist once onReady finished).
+  if (app.isReady()) {
     void openDocument(filePath);
   } else {
     pendingOpenPath = filePath;
@@ -249,14 +320,17 @@ async function onReady(): Promise<void> {
   // belt-and-braces guarantee that Redra asks for NO system permissions.
   appSession = session.fromPartition('redra-ephemeral');
 
-  installRedraProtocolHandler(appSession.protocol, (docId) => docManager.getServed(docId));
+  // Each docId is served by exactly one window's DocumentManager; closed or
+  // replaced documents drop out of the registry lookup and 404, as before.
+  installRedraProtocolHandler(appSession.protocol, (docId) =>
+    registry.byDocId(docId)?.docManager.getServed(docId),
+  );
 
   recents = new RecentsStore(path.join(app.getPath('userData'), 'recents.json'));
   await recents.load();
 
   settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
   await settingsStore.load();
-  docManager.setBackupEnabled(settingsStore.get().backupOnFirstSave);
 
   // Central backups instead of .bak files next to the user's documents.
   // Existing .bak files are the user's property — never touched or removed.
@@ -265,16 +339,20 @@ async function onReady(): Promise<void> {
   backupsDir = path.join(app.getPath('userData'), 'backups');
   const store = new BackupStore(backupsDir);
   backupStore = store;
-  docManager.setBackupWriter(async (filePath, bytes) => {
+  backupWriter = async (filePath, bytes) => {
     await store.backupFor(filePath, bytes, Date.now());
     await store.prune(BACKUPS_KEEP_PER_FILE, BACKUPS_KEEP_GLOBAL);
     void rebuildAppMenu(); // a new version just appeared in "Version History"
-  });
+  };
 
   await rebuildAppMenu();
   registerIpc();
-  createWindow(readyAt);
+  createWindowContext(readyAt);
   scheduleUpdateCheck();
+
+  // The menu acts on the focused window: doc-only items, the Preview
+  // checkbox and "Version History" all follow focus changes.
+  app.on('browser-window-focus', () => void rebuildAppMenu());
 
   // Dev-run dock icon (packaged builds get it from electron-builder in Stage 5).
   if (!app.isPackaged && process.platform === 'darwin') {
@@ -284,7 +362,7 @@ async function onReady(): Promise<void> {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(performance.now());
+      createWindowContext();
       // open-file may have queued a path while no window existed.
       void drainPendingOpen();
     }
@@ -294,13 +372,13 @@ async function onReady(): Promise<void> {
   if (pending) await pending;
   smoke.onReady(pending !== null);
   shot.schedule(
-    () => win,
-    () => docView,
+    () => registry.all()[0]?.win ?? null,
+    () => registry.all()[0]?.docView ?? null,
     pending !== null,
   );
 }
 
-/** Open the path queued by 'open-file' while no window existed, if any. */
+/** Open the path queued by 'open-file' while the app was not ready yet, if any. */
 function drainPendingOpen(): Promise<OpenResult> | null {
   if (!pendingOpenPath) return null;
   const p = pendingOpenPath;
@@ -310,15 +388,24 @@ function drainPendingOpen(): Promise<OpenResult> | null {
 
 // --- window + document view ----------------------------------------------
 
-function createWindow(readyAt: number): void {
-  win = new BrowserWindow({
+/**
+ * Create a new window with its own context (start screen until a document
+ * opens into it). On macOS all Redra windows share a tabbingIdentifier, so
+ * the system decides whether a new window appears as a separate window or as
+ * a native tab (System Settings → Desktop & Dock → "Prefer tabs"), and the
+ * stock Window-menu items (merge/move/show tab bar) work via role:windowMenu.
+ */
+function createWindowContext(readyAt?: number): WindowContext {
+  const win = new BrowserWindow({
     width: 1100,
     height: 760,
     minWidth: 800,
     minHeight: 600,
     backgroundColor: '#F7F6F3',
     show: false,
-    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, tabbingIdentifier: 'redra' }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/shell.cjs'),
       session: appSession ?? undefined,
@@ -329,53 +416,91 @@ function createWindow(readyAt: number): void {
   });
   win.setTitle('Redra');
 
+  // One DocumentManager per window: its state IS the per-window document
+  // state (OpenedDoc + Journal), so ownership lands where it belongs.
+  const dm = new DocumentManager(perf);
+  dm.setBackupEnabled(settingsStore.get().backupOnFirstSave);
+  dm.setBackupWriter(backupWriter);
+
+  const ctx = new WindowContext(win, dm);
+  // Save / export / close-guard flows live in save-flow.ts; every context
+  // gets its own instance with context-bound deps (closeFlowActive included).
+  ctx.saveFlow = createSaveFlow({
+    docManager: dm,
+    perf,
+    smoke: SMOKE,
+    t: (key) => t(key), // forwards to the locale-resolved table (set in onReady)
+    getWin: () => (win.isDestroyed() ? null : win),
+    getDocView: () => ctx.docView,
+    commitActiveEdit: () => commitActiveEdit(ctx),
+    isQuitRequested: () => quitRequested,
+    clearQuitRequested: () => {
+      quitRequested = false;
+    },
+  });
+  registry.add(ctx);
+
   win.once('ready-to-show', () => {
-    win?.show();
-    perf.record('ready-to-window-shown', performance.now() - readyAt, {
-      sinceProcessStart: performance.now(),
-    });
+    if (win.isDestroyed()) return;
+    win.show();
+    if (!firstWindowShown && readyAt !== undefined) {
+      firstWindowShown = true;
+      perf.record('ready-to-window-shown', performance.now() - readyAt, {
+        sinceProcessStart: performance.now(),
+      });
+    }
   });
 
   // Shell renderer never navigates anywhere.
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-  win.on('resize', layoutDocView);
+  win.on('resize', () => layoutDocView(ctx));
   win.on('close', (event) => {
     if (SMOKE) return;
-    if (saveFlow.isCloseFlowActive()) {
+    if (ctx.saveFlow.isCloseFlowActive()) {
       // A second close while the dialog is up must not slip through.
       event.preventDefault();
       return;
     }
-    if (!docManager.currentDoc || !win) return;
+    if (!ctx.docManager.currentDoc) return;
     // A document is open: even with a clean journal there may be an active
     // edit session (typed text not yet committed) — intercept and go async.
+    // On Cmd+Q Electron fires 'close' per window, so each window runs its
+    // own guard; "Cancel" in any dialog aborts the quit (clearQuitRequested)
+    // while already-closed windows stay closed — TextEdit behaves the same.
     event.preventDefault();
-    void saveFlow.handleCloseRequest(win);
+    void ctx.saveFlow.handleCloseRequest(win);
   });
   win.on('closed', () => {
-    win = null;
-    docView = null;
-    // Single-window v1: the document dies with its window. Otherwise a
-    // reopened (activate) window would show the start screen while Cmd+S
-    // still silently saved the stale document.
-    docManager.close();
-    setDocMenuEnabled(false);
-    setPreview(false);
-    void rebuildAppMenu(); // version submenu empties with the document
+    // The document dies with its window: drop it so in-flight async flows
+    // holding this context see no doc, and the registry stops resolving the
+    // docId (protocol → 404) and the IPC sender ids.
+    ctx.docManager.close();
+    // The doc view is a CHILD view, not the window's own webContents — tear
+    // its webContents down explicitly instead of relying on the Electron
+    // version's WebContentsView GC behavior.
+    const docWc = ctx.docView?.webContents;
+    if (docWc && !docWc.isDestroyed()) docWc.close();
+    ctx.docView = null;
+    registry.remove(ctx);
+    void rebuildAppMenu(); // the focused-window state the menu mirrors changed
   });
+
+  // A late window must still show the update pill from this launch's check.
+  if (pendingUpdate) sendToShell(ctx, 'update:available', pendingUpdate);
 
   if (process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL']);
   } else {
     void win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
+  return ctx;
 }
 
-function ensureDocView(): WebContentsView {
-  if (docView && win) return docView;
-  if (!win) throw new Error('no window');
+function ensureDocView(ctx: WindowContext): WebContentsView {
+  if (ctx.docView) return ctx.docView;
+  if (ctx.win.isDestroyed()) throw new Error('no window');
 
   const view = new WebContentsView({
     webPreferences: {
@@ -386,9 +511,10 @@ function ensureDocView(): WebContentsView {
       nodeIntegration: false,
     },
   });
-  win.contentView.addChildView(view);
-  docView = view;
-  layoutDocView();
+  ctx.win.contentView.addChildView(view);
+  ctx.docView = view;
+  ctx.docViewWcId = view.webContents.id;
+  layoutDocView(ctx);
 
   const wc = view.webContents;
 
@@ -400,6 +526,23 @@ function ensureDocView(): WebContentsView {
     void wc.insertCSS(EDITOR_CSS).catch((err: unknown) => {
       console.error('[editor] insertCSS failed:', err);
     });
+  });
+
+  // Find in document: forward the native match counter to THIS window's
+  // shell (the find bar lives there; the search runs in the doc view).
+  wc.on('found-in-page', (_event, result) => {
+    sendToShell(ctx, 'find:result', {
+      activeMatchOrdinal: result.activeMatchOrdinal,
+      matches: result.matches,
+    });
+  });
+
+  // A find session does not survive the page it ran in: stop the native
+  // search on any real main-frame navigation (doc reload, version restore)
+  // so no stale highlights or late found-in-page events leak into the next
+  // document state. The shell resets its bar on 'doc:opened' in parallel.
+  wc.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) wc.stopFindInPage('clearSelection');
   });
 
   // Navigation policy: http(s) → external browser; same-doc redra:// root
@@ -417,7 +560,7 @@ function ensureDocView(): WebContentsView {
       return;
     }
     if (parsed && parsed.protocol === 'redra:') {
-      const cur = docManager.currentDoc;
+      const cur = ctx.docManager.currentDoc;
       const sameDocRoot = cur && parsed.hostname === 'doc' && parsed.pathname === `/${cur.docId}/`;
       if (sameDocRoot) return; // allow (e.g. anchors that re-request the root)
       // Relative links to sibling .html docs are deliberately dead until multi-doc support.
@@ -447,10 +590,10 @@ function ensureDocView(): WebContentsView {
   return view;
 }
 
-function layoutDocView(): void {
-  if (!win || !docView) return;
-  const [width, height] = win.getContentSize();
-  docView.setBounds({
+function layoutDocView(ctx: WindowContext): void {
+  if (!ctx.docView || ctx.win.isDestroyed()) return;
+  const [width, height] = ctx.win.getContentSize();
+  ctx.docView.setBounds({
     x: 0,
     y: SHELL_STRIP_HEIGHT,
     width: width ?? 0,
@@ -460,10 +603,11 @@ function layoutDocView(): void {
 
 // --- settings ----------------------------------------------------------------
 
-/** Single entry point for settings changes (IPC and menu): persist + apply. */
+/** Single entry point for settings changes (IPC and menu): persist + apply
+ * to every window's DocumentManager (the setting itself is global). */
 async function applySettings(patch: unknown): Promise<Settings> {
   const next = await settingsStore.set(patch);
-  docManager.setBackupEnabled(next.backupOnFirstSave);
+  for (const ctx of registry.all()) ctx.docManager.setBackupEnabled(next.backupOnFirstSave);
   setBackupMenuChecked(next.backupOnFirstSave);
   return next;
 }
@@ -480,20 +624,19 @@ async function showBackupsFolder(): Promise<void> {
 
 /**
  * One quiet check per launch, ~8s after ready so it never touches the start
- * budget. Offline / API errors stay silent; the shell only hears about a
- * strictly newer release the user has not dismissed.
+ * budget. Offline / API errors stay silent; every shell window shows its own
+ * pill (dismiss persists globally, as before); windows created later get the
+ * pill on creation via pendingUpdate.
  */
 function scheduleUpdateCheck(): void {
   if (SMOKE) return; // smoke runs are short-lived and must stay network-free
   setTimeout(() => {
     void fetchLatestRelease().then((latest) => {
-      if (!latest || !win) return;
+      if (!latest) return;
       const dismissed = settingsStore.get().dismissedUpdateVersion;
       if (!shouldNotify(app.getVersion(), latest.version, dismissed)) return;
-      win.webContents.send('update:available', {
-        version: latest.version,
-        url: latest.url,
-      });
+      pendingUpdate = { version: latest.version, url: latest.url };
+      for (const ctx of registry.all()) sendToShell(ctx, 'update:available', pendingUpdate);
     });
   }, 8000);
 }
@@ -515,17 +658,21 @@ function isRedraReleaseUrl(url: string): boolean {
 
 // --- editing mode + edit-session commit -------------------------------------
 
-/** Toggle Preview: editing layer off in the doc view, pill in the shell. */
-function setPreview(on: boolean): void {
+/** Toggle Preview for ONE window: editing layer off in its doc view, pill in its shell. */
+function setPreview(ctx: WindowContext, on: boolean): void {
   // Switching INTO preview must not lose an in-flight edit session.
   const finish = (): void => {
-    previewOn = on;
-    const item = Menu.getApplicationMenu()?.getMenuItemById('view-preview');
-    if (item) item.checked = on;
-    docView?.webContents.send('mode:set', { editing: !on });
-    win?.webContents.send('mode:changed', { editing: !on });
+    ctx.previewOn = on;
+    // The View checkbox mirrors the FOCUSED window; for any other window the
+    // focus-change rebuild picks the state up later.
+    if (ctx === focusedCtx()) {
+      const item = Menu.getApplicationMenu()?.getMenuItemById('view-preview');
+      if (item) item.checked = on;
+    }
+    ctx.docView?.webContents.send('mode:set', { editing: !on });
+    sendToShell(ctx, 'mode:changed', { editing: !on });
   };
-  if (on && !previewOn) void commitActiveEdit().then(finish);
+  if (on && !ctx.previewOn) void commitActiveEdit(ctx).then(finish);
   else finish();
 }
 
@@ -539,8 +686,8 @@ function setPreview(on: boolean): void {
  * ops:push the commit produced has already been received and journaled —
  * the ack doubles as an ordering barrier for in-flight ops:push.
  */
-function commitActiveEdit(): Promise<void> {
-  const wc = docView?.webContents;
+function commitActiveEdit(ctx: WindowContext): Promise<void> {
+  const wc = ctx.docView?.webContents;
   if (!wc || wc.isDestroyed()) return Promise.resolve();
   const nonce = randomUUID();
   return new Promise<void>((resolve) => {
@@ -562,38 +709,57 @@ function commitActiveEdit(): Promise<void> {
   });
 }
 
-function broadcastDirty(): void {
+function broadcastDirty(ctx: WindowContext): void {
   // isDirty covers both journal ops and a restored-but-unsaved backup.
-  win?.webContents.send('doc:dirtyChanged', { dirty: docManager.isDirty() });
+  sendToShell(ctx, 'doc:dirtyChanged', { dirty: ctx.docManager.isDirty() });
 }
 
 // --- open flow ---------------------------------------------------------------
 
-async function openDocument(filePath: string): Promise<OpenResult> {
-  // Menu accelerators must not interleave with the close-guard dialog.
-  if (saveFlow.isCloseFlowActive()) return { ok: false, canceled: true };
+/**
+ * Route an open (recents click, drop, ⌘O, open-file, CLI):
+ *  - the file is already open in some window → focus that window, never a
+ *    second copy;
+ *  - `prefer` (the shell window the request came from — e.g. a drop onto a
+ *    background start screen, which does NOT focus the window) is free →
+ *    open into it;
+ *  - the focused window shows the start screen → open into it;
+ *  - otherwise → a NEW window (a native tab when the system prefers tabs).
+ * Opening therefore never replaces a document — the old open-over-dirty
+ * guard is gone with the path that needed it.
+ */
+async function openDocument(filePath: string, prefer?: WindowContext): Promise<OpenResult> {
+  const resolved = path.resolve(filePath);
 
-  // Opening over a dirty document would silently drop its edits — same
-  // three-button guard as window close. Smoke runs never open over dirty,
-  // but keep them dialog-free by construction.
-  if (!SMOKE && win && docManager.currentDoc) {
-    // In-flight typed text counts as unsaved — commit it into the journal first.
-    await commitActiveEdit();
-    const cur = docManager.currentDoc;
-    if (cur && docManager.isDirty()) {
-      const choice = await saveFlow.askUnsavedChanges(win, path.basename(cur.filePath));
-      if (choice === 'cancel') return { ok: false, canceled: true };
-      if (choice === 'save') {
-        const saved = await saveFlow.doSave(false);
-        if (!saved.ok) return { ok: false, canceled: true };
-      }
-    }
+  const already = registry.byDocPath(resolved);
+  if (already && !already.win.isDestroyed()) {
+    const cur = already.docManager.currentDoc!; // byDocPath implies a doc
+    if (already.win.isMinimized()) already.win.restore();
+    already.win.show();
+    already.win.focus();
+    return { ok: true, path: cur.filePath, name: path.basename(cur.filePath) };
   }
+
+  const isFree = (c: WindowContext): boolean =>
+    isFreeForOpen({
+      hasDoc: !!c.docManager.currentDoc,
+      closeFlowActive: c.saveFlow.isCloseFlowActive(),
+      opening: c.opening,
+    });
+  const target =
+    prefer && registry.byShellWcId(prefer.shellWcId) === prefer && isFree(prefer)
+      ? prefer
+      : chooseOpenTarget(focusedCtx(), registry.all(), isFree);
+  const ctx = target ?? createWindowContext();
+  const createdFresh = target === null;
+  // Busy until dm.open + loadURL settle: a second quick open must route to
+  // another (or a new) window instead of racing this context's manager.
+  ctx.opening = true;
 
   const t0 = performance.now();
   try {
-    const { opened, timings } = await docManager.open(filePath);
-    const view = ensureDocView();
+    const { opened, timings } = await ctx.docManager.open(resolved);
+    const view = ensureDocView(ctx);
     await view.webContents.loadURL(`redra://doc/${opened.docId}/`);
     perf.record('open-to-served', performance.now() - t0, {
       read: timings.readMs,
@@ -603,13 +769,12 @@ async function openDocument(filePath: string): Promise<OpenResult> {
     });
 
     const name = path.basename(opened.filePath);
-    win?.setTitle(`${name} — Redra`);
-    setDocMenuEnabled(true);
-    win?.webContents.send('doc:opened', { path: opened.filePath, name });
-    win?.webContents.send('doc:dirtyChanged', { dirty: docManager.isDirty() });
+    if (!ctx.win.isDestroyed()) ctx.win.setTitle(`${name} — Redra`);
+    sendToShell(ctx, 'doc:opened', { path: opened.filePath, name });
+    broadcastDirty(ctx);
     // A fresh document always starts in live editing, never in Preview.
-    setPreview(false);
-    void rebuildAppMenu(); // "Version History" entries for THIS file
+    setPreview(ctx, false);
+    void rebuildAppMenu(); // doc-only items + "Version History" for THIS file
 
     app.addRecentDocument(opened.filePath);
     await recents.add(opened.filePath);
@@ -620,17 +785,27 @@ async function openDocument(filePath: string): Promise<OpenResult> {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[open] failed:', message);
     if (SMOKE) app.exit(1);
-    else if (win) dialog.showErrorBox(t('error.openTitle'), message);
+    else dialog.showErrorBox(t('error.openTitle'), message);
+    // A window created just for this open would linger as an unexpected
+    // empty window — close it (user-created start screens are kept).
+    if (createdFresh && !ctx.win.isDestroyed() && !ctx.docManager.currentDoc) ctx.win.destroy();
     return { ok: false, error: message };
+  } finally {
+    ctx.opening = false;
   }
 }
 
 async function openViaDialog(): Promise<OpenResult> {
-  if (!win) return { ok: false, error: 'no window' };
-  const result = await dialog.showOpenDialog(win, {
-    properties: ['openFile'],
+  // Parent the dialog to the focused window when there is one; with all
+  // windows closed (macOS menu stays alive) the dialog opens unparented.
+  const parent = focusedCtx()?.win ?? null;
+  const options = {
+    properties: ['openFile' as const],
     filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
-  });
+  };
+  const result = parent
+    ? await dialog.showOpenDialog(parent, options)
+    : await dialog.showOpenDialog(options);
   const first = result.filePaths[0];
   if (result.canceled || !first) return { ok: false, canceled: true };
   return openDocument(first);
@@ -638,48 +813,66 @@ async function openViaDialog(): Promise<OpenResult> {
 
 // --- IPC -------------------------------------------------------------------
 
-/** True when the invoke came from the shell window's renderer. */
-function fromShell(event: IpcMainInvokeEvent): boolean {
-  return senderMatches(event, win?.webContents);
-}
-
-/** True when the invoke came from the document view's renderer. */
-function fromDoc(event: IpcMainInvokeEvent): boolean {
-  return senderMatches(event, docView?.webContents);
-}
-
 function registerIpc(): void {
-  // --- shell channels ---
+  // --- shell channels (sender → context via the registry) ---
   ipcMain.handle('dialog:openFile', (event) => {
-    if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies OpenResult;
+    if (!shellCtx(event)) return { ok: false, error: 'bad sender' } satisfies OpenResult;
     return openViaDialog();
   });
   ipcMain.handle('doc:open', (event, filePath: unknown) => {
-    if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies OpenResult;
+    const ctx = shellCtx(event);
+    if (!ctx) return { ok: false, error: 'bad sender' } satisfies OpenResult;
     if (typeof filePath !== 'string' || filePath.length === 0) {
       return { ok: false, error: 'bad path' } satisfies OpenResult;
     }
-    return openDocument(filePath);
+    // Drop / recents click: the window the request came from is the natural
+    // target when it still shows the start screen (a drop does not focus it).
+    return openDocument(filePath, ctx);
   });
   ipcMain.handle('doc:save', (event) => {
-    if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies SaveResult;
-    return saveFlow.doSave(false);
+    const ctx = shellCtx(event);
+    if (!ctx) return { ok: false, error: 'bad sender' } satisfies SaveResult;
+    return ctx.saveFlow.doSave(false);
   });
   ipcMain.handle('doc:saveAs', (event) => {
-    if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies SaveResult;
-    return saveFlow.doSave(true);
+    const ctx = shellCtx(event);
+    if (!ctx) return { ok: false, error: 'bad sender' } satisfies SaveResult;
+    return ctx.saveFlow.doSave(true);
   });
   ipcMain.handle('doc:exportPdf', (event) => {
-    if (!fromShell(event)) return { ok: false, error: 'bad sender' } satisfies ExportResult;
-    return saveFlow.exportPdf();
+    const ctx = shellCtx(event);
+    if (!ctx) return { ok: false, error: 'bad sender' } satisfies ExportResult;
+    return ctx.saveFlow.exportPdf();
   });
   ipcMain.on('mode:toggle', (event) => {
-    if (!senderMatches(event, win?.webContents)) return;
-    if (!docManager.currentDoc) return; // no doc — nothing to preview
-    setPreview(!previewOn);
+    const ctx = shellCtx(event);
+    if (!ctx?.docManager.currentDoc) return; // no doc — nothing to preview
+    setPreview(ctx, !ctx.previewOn);
+  });
+  // --- find in document (⌘F, v0.3.0) ---
+  // The bar lives in the shell, the search runs on that window's DOC view.
+  // NB Electron semantics: findNext:true BEGINS a session, false steps it.
+  const MAX_FIND_TEXT = 1024;
+  const findTarget = (event: IpcMainEvent): Electron.WebContents | null => {
+    const wc = shellCtx(event)?.docView?.webContents;
+    return wc && !wc.isDestroyed() ? wc : null;
+  };
+  ipcMain.on('find:start', (event, text: unknown) => {
+    const wc = findTarget(event);
+    if (!wc || typeof text !== 'string' || text.length > MAX_FIND_TEXT) return;
+    if (text.length === 0) wc.stopFindInPage('clearSelection');
+    else wc.findInPage(text, { findNext: true });
+  });
+  ipcMain.on('find:next', (event, text: unknown, forward: unknown) => {
+    const wc = findTarget(event);
+    if (!wc || typeof text !== 'string' || text.length === 0 || text.length > MAX_FIND_TEXT) return;
+    wc.findInPage(text, { findNext: false, forward: forward !== false });
+  });
+  ipcMain.on('find:stop', (event) => {
+    findTarget(event)?.stopFindInPage('clearSelection');
   });
   ipcMain.handle('recents:get', (event): RecentEntry[] => {
-    if (!fromShell(event)) return [];
+    if (!shellCtx(event)) return [];
     const home = os.homedir();
     return recents.get().map((e) => ({
       ...e,
@@ -688,31 +881,34 @@ function registerIpc(): void {
     }));
   });
   ipcMain.handle('settings:get', (event) =>
-    fromShell(event) ? settingsStore.get() : ({ ...DEFAULT_SETTINGS } satisfies Settings),
+    shellCtx(event) ? settingsStore.get() : ({ ...DEFAULT_SETTINGS } satisfies Settings),
   );
   ipcMain.handle('settings:set', (event, patch: unknown) => {
-    if (!fromShell(event)) return settingsStore.get();
+    if (!shellCtx(event)) return settingsStore.get();
     return applySettings(patch);
   });
-  ipcMain.handle('perf:get', (event) => (fromShell(event) ? perf.all() : []));
+  ipcMain.handle('perf:get', (event) => (shellCtx(event) ? perf.all() : []));
   ipcMain.on('update:open', (event, url: unknown) => {
-    if (!senderMatches(event, win?.webContents)) return;
+    if (!shellCtx(event)) return;
     if (typeof url !== 'string' || !isRedraReleaseUrl(url)) return;
     void shell.openExternal(url);
   });
   ipcMain.on('update:dismiss', (event, version: unknown) => {
-    if (!senderMatches(event, win?.webContents)) return;
+    if (!shellCtx(event)) return;
     if (typeof version !== 'string' || version.length === 0) return;
     void applySettings({ dismissedUpdateVersion: version });
   });
 
   // --- doc-view channels (Stage 3 editing bridge) ---
-  // Every ops call carries the docId baked into the sender's URL: the doc
-  // view WebContents is reused across documents, so an in-flight invoke from
-  // document A must never land in document B's journal (see guardDocPush).
+  // The sender resolves to ITS window's context, so an op can only ever land
+  // in that window's journal. Every ops call additionally carries the docId
+  // baked into the sender's URL: the view is reused across navigations
+  // (version restore), so an in-flight invoke from document A must never
+  // land in document B's journal (see guardDocPush).
   ipcMain.handle('ops:push', (event, docId: unknown, raw: unknown): OpPushResult => {
-    if (!fromDoc(event)) return { ok: false, error: 'bad sender' };
-    const cur = docManager.currentDoc;
+    const ctx = docCtx(event);
+    if (!ctx) return { ok: false, error: 'bad sender' };
+    const cur = ctx.docManager.currentDoc;
     if (!cur) return { ok: false, error: 'no document' };
     const checked = guardDocPush(docId, raw, cur.docId, cur.doc, cur.journal.ops);
     if (!checked.ok) {
@@ -729,31 +925,69 @@ function registerIpc(): void {
       return { ok: false, error: checked.error, code: checked.code, userMessage };
     }
     cur.journal.push(checked.op);
-    broadcastDirty();
+    broadcastDirty(ctx);
     return { ok: true };
   });
+  // Block duplication: mint + validate + render + push in ONE invoke, so the
+  // cloneId can never race another mint. The fragment is rendered BEFORE the
+  // journal push — if the engine rejects the op for any reason, nothing was
+  // recorded and the preload inserts nothing.
+  ipcMain.handle('ops:cloneBlock', (event, docId: unknown, targetId: unknown): CloneBlockResult => {
+    const ctx = docCtx(event);
+    if (!ctx) return { ok: false, error: 'bad sender' };
+    const cur = ctx.docManager.currentDoc;
+    if (!cur) return { ok: false, error: 'no document' };
+    const cloneId = `c${cur.cloneCounter + 1}`;
+    const checked = guardCloneBlock(docId, targetId, cloneId, cur.docId, cur.doc, cur.journal.ops);
+    if (!checked.ok) {
+      console.error('[ops] rejected cloneBlock:', checked.error);
+      const userMessage =
+        checked.code === 'blocked-subtree'
+          ? t('notice.blockedBlock')
+          : checked.code === 'invalid'
+            ? t('notice.opRejected')
+            : undefined;
+      return { ok: false, error: checked.error, code: checked.code, userMessage };
+    }
+    let html: string;
+    try {
+      html = renderCloneFragment(cur.doc, cur.journal.ops, checked.op.id, cloneId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[ops] cloneBlock render failed:', message);
+      return { ok: false, error: message, code: 'invalid', userMessage: t('notice.opRejected') };
+    }
+    cur.cloneCounter += 1;
+    cur.journal.push(checked.op);
+    broadcastDirty(ctx);
+    return { ok: true, cloneId, html };
+  });
   // A rejected push the preload rolled back: forward main's own localized
-  // text to the shell as a transient toast. Length-capped defense in depth —
-  // the doc preload only ever echoes a userMessage main produced above.
+  // text to the OWNING window's shell as a transient toast. Length-capped
+  // defense in depth — the doc preload only ever echoes a userMessage main
+  // produced above.
   ipcMain.on('ops:rejected-notice', (event, message: unknown) => {
-    if (!senderMatches(event, docView?.webContents)) return;
+    const ctx = docCtx(event);
+    if (!ctx) return;
     if (typeof message !== 'string' || message.length === 0 || message.length > 500) return;
-    win?.webContents.send('notice:show', { text: message });
+    sendToShell(ctx, 'notice:show', { text: message });
   });
   ipcMain.handle('ops:undo', (event, docId: unknown): OpUndoResult => {
-    if (!fromDoc(event)) return { ok: false, dirty: false };
-    const cur = docManager.currentDoc;
+    const ctx = docCtx(event);
+    if (!ctx) return { ok: false, dirty: false };
+    const cur = ctx.docManager.currentDoc;
     if (!cur || docId !== cur.docId) return { ok: false, dirty: cur?.journal.dirty ?? false };
     const ok = cur.journal.undo();
-    broadcastDirty();
+    broadcastDirty(ctx);
     return { ok, dirty: cur.journal.dirty };
   });
   ipcMain.handle('ops:redo', (event, docId: unknown): OpUndoResult => {
-    if (!fromDoc(event)) return { ok: false, dirty: false };
-    const cur = docManager.currentDoc;
+    const ctx = docCtx(event);
+    if (!ctx) return { ok: false, dirty: false };
+    const cur = ctx.docManager.currentDoc;
     if (!cur || docId !== cur.docId) return { ok: false, dirty: cur?.journal.dirty ?? false };
     const ok = cur.journal.redo();
-    broadcastDirty();
+    broadcastDirty(ctx);
     return { ok, dirty: cur.journal.dirty };
   });
   // --- image replacement (v0.2.0) ---
@@ -764,11 +998,12 @@ function registerIpc(): void {
   ipcMain.handle(
     'image:pick',
     async (event, docId: unknown, id: unknown): Promise<ImageValueResult> => {
-      if (!fromDoc(event)) return { ok: false, error: 'bad sender' };
-      const guard = guardImageRequest(docId, id);
+      const ctx = docCtx(event);
+      if (!ctx) return { ok: false, error: 'bad sender' };
+      const guard = guardImageRequest(ctx, docId, id);
       if (guard) return guard;
-      if (!win) return { ok: false, canceled: true };
-      const result = await dialog.showOpenDialog(win, {
+      if (ctx.win.isDestroyed()) return { ok: false, canceled: true };
+      const result = await dialog.showOpenDialog(ctx.win, {
         properties: ['openFile'],
         filters: [{ name: t('dialog.imagesFilter'), extensions: [...IMAGE_EXTENSIONS] }],
       });
@@ -780,8 +1015,9 @@ function registerIpc(): void {
   ipcMain.handle(
     'image:fromPath',
     async (event, docId: unknown, id: unknown, filePath: unknown): Promise<ImageValueResult> => {
-      if (!fromDoc(event)) return { ok: false, error: 'bad sender' };
-      const guard = guardImageRequest(docId, id);
+      const ctx = docCtx(event);
+      if (!ctx) return { ok: false, error: 'bad sender' };
+      const guard = guardImageRequest(ctx, docId, id);
       if (guard) return guard;
       if (typeof filePath !== 'string' || filePath.length === 0) {
         return { ok: false, error: 'bad path' };
@@ -794,7 +1030,7 @@ function registerIpc(): void {
     },
   );
   ipcMain.handle('link:openExternal', (event, url: unknown) => {
-    if (!fromDoc(event)) return;
+    if (!docCtx(event)) return;
     if (typeof url !== 'string') return;
     let parsed: URL;
     try {
@@ -808,7 +1044,7 @@ function registerIpc(): void {
   // Liveness beacon from the doc preload (see doc.ts). Smoke runs treat a
   // missing beacon as failure; outside smoke it is just a perf datapoint.
   ipcMain.on('doc:editorReady', (event) => {
-    if (!senderMatches(event, docView?.webContents)) return;
+    if (!docCtx(event)) return;
     smoke.onEditorReady();
   });
 }
@@ -819,8 +1055,8 @@ function registerIpc(): void {
  * a compromised preload cannot use these channels to read files on behalf
  * of a non-image element. Null = ok.
  */
-function guardImageRequest(docId: unknown, id: unknown): ImageValueResult | null {
-  const cur = docManager.currentDoc;
+function guardImageRequest(ctx: WindowContext, docId: unknown, id: unknown): ImageValueResult | null {
+  const cur = ctx.docManager.currentDoc;
   if (!cur || docId !== cur.docId) return { ok: false, error: 'stale document' };
   const el = typeof id === 'string' ? getElementById(cur.doc, id) : undefined;
   if (!el) return { ok: false, error: 'unknown element' };

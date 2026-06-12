@@ -35,6 +35,12 @@ export interface OpenedDoc {
    * dirty (see isDirty) even with a clean journal.
    */
   restoredFromBackup: boolean;
+  /**
+   * cloneBlock id mint: the next clone gets "c<counter+1>". Monotonic per
+   * document and NEVER decremented (an undone cloneBlock still sits in the
+   * journal's redo tail with its id — reuse would collide on redo).
+   */
+  cloneCounter: number;
 }
 
 export interface OpenTimings {
@@ -53,9 +59,11 @@ export interface OpenTimings {
 export type BackupWriter = (filePath: string, bytes: Buffer) => Promise<void>;
 
 /**
- * Owns the currently opened document (single-window v1: re-open replaces it).
- * All Electron-facing wiring (views, dialogs, IPC) lives in index.ts;
- * this class only touches fs + the engine, so it stays thin and portable.
+ * Owns ONE window's opened document — every WindowContext gets its own
+ * instance (one window = one document since v0.3.0; re-open into the same
+ * context replaces the doc, e.g. on version restore). All Electron-facing
+ * wiring (views, dialogs, IPC) lives in index.ts; this class only touches
+ * fs + the engine, so it stays thin and portable.
  */
 export class DocumentManager {
   private current: OpenedDoc | null = null;
@@ -127,6 +135,7 @@ export class DocumentManager {
       lastKnownMtimeMs: stat.mtimeMs,
       backupDone: false,
       restoredFromBackup: false,
+      cloneCounter: 0,
     };
     this.current = opened; // replaces any previous doc; its docId now 404s
 
@@ -140,7 +149,7 @@ export class DocumentManager {
     return { opened, timings };
   }
 
-  /** Drop the current document (single-window v1: it dies with its window). */
+  /** Drop the document (it dies with its window — see the 'closed' handler). */
   close(): void {
     this.current = null;
   }
@@ -200,6 +209,7 @@ export class DocumentManager {
       lastKnownMtimeMs: st?.mtimeMs ?? cur.lastKnownMtimeMs,
       backupDone: true, // the pre-restore snapshot above IS this session's backup
       restoredFromBackup: true,
+      cloneCounter: 0, // fresh document state — fresh journal, fresh mint
     };
     this.current = opened;
     return { opened };

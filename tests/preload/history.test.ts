@@ -123,3 +123,23 @@ describe('LocalHistory — DOM inverse stack', () => {
     expect(p.innerHTML).toBe('x');
   });
 });
+
+describe('LocalHistory — cloneBlock entries', () => {
+  it('cloneBlock: undo removes the inserted clone, redo re-inserts it at the exact slot', () => {
+    document.body.innerHTML = '<p data-redra-id="r3">a</p>\n<p data-redra-id="r4">b</p>';
+    const original = document.querySelector('[data-redra-id=r3]')!;
+    original.insertAdjacentHTML('afterend', '<p data-redra-id="c1">a</p>');
+    const clone = original.nextElementSibling!;
+    const parent = clone.parentNode as Node & ParentNode;
+    history.push({ kind: 'cloneBlock', node: clone, parent, nextSibling: clone.nextSibling });
+    expect(ids()).toBe('r3,c1,r4');
+
+    expect(history.undo()).toBe(true);
+    expect(ids()).toBe('r3,r4');
+    expect(document.contains(clone)).toBe(false);
+
+    expect(history.redo()).toBe(true);
+    expect(ids()).toBe('r3,c1,r4');
+    expect(clone.previousElementSibling).toBe(original);
+  });
+});

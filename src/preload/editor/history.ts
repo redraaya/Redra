@@ -9,6 +9,8 @@
 export type HistoryEntry =
   | { kind: 'editText'; el: HTMLElement; prevHtml: string; newHtml: string }
   | { kind: 'deleteBlock'; node: Element; parent: Node & ParentNode; nextSibling: Node | null }
+  /** The INSERTED clone (undo = remove it, redo = re-insert before nextSibling). */
+  | { kind: 'cloneBlock'; node: Element; parent: Node & ParentNode; nextSibling: Node | null }
   | {
       kind: 'setAttr';
       el: Element;
@@ -56,6 +58,9 @@ export class LocalHistory {
       case 'deleteBlock':
         entry.parent.insertBefore(entry.node, entry.nextSibling);
         break;
+      case 'cloneBlock':
+        entry.node.remove();
+        break;
       case 'moveBlock':
         entry.parent.insertBefore(entry.node, entry.oldNext);
         break;
@@ -90,6 +95,9 @@ export class LocalHistory {
         break;
       case 'deleteBlock':
         entry.node.remove();
+        break;
+      case 'cloneBlock':
+        entry.parent.insertBefore(entry.node, entry.nextSibling);
         break;
       case 'moveBlock':
         entry.parent.insertBefore(entry.node, entry.newNext);
