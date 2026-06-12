@@ -29,6 +29,7 @@ const STRINGS = {
   'menu.quit': { ru: 'Выход', en: 'Exit' },
   'menu.file': { ru: 'Файл', en: 'File' },
   'menu.open': { ru: 'Открыть…', en: 'Open…' },
+  'menu.close': { ru: 'Закрыть окно', en: 'Close Window' },
   'menu.save': { ru: 'Сохранить', en: 'Save' },
   'menu.saveAs': { ru: 'Сохранить как…', en: 'Save As…' },
   'menu.exportPdf': { ru: 'Экспорт в PDF…', en: 'Export to PDF…' },

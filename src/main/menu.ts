@@ -83,6 +83,10 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
   const fileSubmenu: MenuItemConstructorOptions[] = [
     { label: t('menu.open'), accelerator: 'CmdOrCtrl+O', click: () => handlers.open() },
     { type: 'separator' },
+    // Standard macOS Close (⌘W). The unsaved-changes close guard intercepts
+    // the window 'close' event, so this is always safe.
+    { role: 'close', label: t('menu.close'), accelerator: 'CmdOrCtrl+W' },
+    { type: 'separator' },
     {
       id: 'file-save',
       label: t('menu.save'),
