@@ -1,7 +1,7 @@
 import { defaultTreeAdapter, parseFragment, serialize } from 'parse5';
 import type { DefaultTreeAdapterMap } from 'parse5';
 import { DROPPED_TAGS, isSafeHref, KEPT_TAGS } from './normalize.js';
-import { isTemplate, walkElements } from './parse.js';
+import { isTemplate, parseDocument, walkElements } from './parse.js';
 import { REDRA_ID_ATTR, type Element, type ParentNode, type RedraDoc, type Template } from './types.js';
 
 type ChildNode = ParentNode['childNodes'][number];
@@ -230,6 +230,29 @@ function cloneSubtree(node: ChildNode): ChildNode {
  * @internal
  */
 export const SETATTR_ALLOWED_NAMES: ReadonlySet<string> = new Set(['src']);
+
+/**
+ * DRY-RUN: would `ops` apply cleanly to this document? Re-parses the pristine
+ * source into a throwaway tree (exactly what serializeSource does at save
+ * time, minus the serialization) and applies the ops to it — the pristine
+ * `doc` is never touched. Main's op-guard uses this for the clone-id residue
+ * cases its cheap prefix rules cannot express, so a push the guard accepts is
+ * BY CONSTRUCTION a push the save will accept.
+ *
+ * @internal
+ */
+export function tryApplyOps(
+  doc: RedraDoc,
+  ops: readonly Op[],
+): { ok: true } | { ok: false; error: string } {
+  const work = parseDocument(doc.source);
+  try {
+    applyOps(work, ops);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 /** Thrown when an operation cannot be applied to the document. */
 export class RedraOpError extends Error {

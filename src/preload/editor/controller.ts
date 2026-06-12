@@ -364,12 +364,27 @@ export function createEditorController(
         return;
       }
       // The block may have left the DOM while the invoke was in flight
-      // (page script). The journal keeps the op either way — recompute on
-      // save is the source of truth; the live copy is best-effort then.
-      if (!block.isConnected) return;
+      // (page script), or the fragment may fail to materialize. Main has
+      // ALREADY journaled the op inside the invoke — without a matching
+      // LocalHistory entry the journal and the local stack would skew
+      // forever (every later ⌘Z would undo the wrong op). The clone op is
+      // top-of-journal at this point, so one bridge.undo() rolls it back.
+      const undoJournaledClone = (why: string): void => {
+        console.warn(`[redra] cloneBlock: ${why} — undoing the journaled op`);
+        void bridge.undo().then((r) => {
+          if (!r.ok) console.error('[redra] cloneBlock rollback desync: journal had nothing to undo');
+        });
+      };
+      if (!block.isConnected) {
+        undoJournaledClone('block left the DOM mid-invoke');
+        return;
+      }
       block.insertAdjacentHTML('afterend', res.html);
       const inserted = block.nextElementSibling;
-      if (!inserted || inserted.getAttribute(REDRA_ID_ATTR) !== res.cloneId) return;
+      if (!inserted || inserted.getAttribute(REDRA_ID_ATTR) !== res.cloneId) {
+        undoJournaledClone('inserted fragment did not materialize as the stamped clone');
+        return;
+      }
       history.push({ kind: 'cloneBlock', node: inserted, parent, nextSibling: inserted.nextSibling });
     });
   }

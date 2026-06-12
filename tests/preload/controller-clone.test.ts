@@ -147,6 +147,47 @@ describe('block duplication via the handle pill (jsdom)', () => {
     expect(bridge.undo).not.toHaveBeenCalled();
   });
 
+  it('a block leaving the DOM mid-invoke undoes the journaled op (no lockstep skew)', async () => {
+    const a = document.getElementById('a')!;
+    bridge.cloneBlock.mockImplementationOnce(async () => {
+      a.remove(); // page script yanked the block while the invoke was in flight
+      return { ok: true as const, cloneId: 'c1', html: CLONE_HTML };
+    });
+    hover(a);
+    const dup = handle().querySelector('.dup') as HTMLElement;
+    dup.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flush();
+
+    // Nothing inserted, and the journal op (already pushed by main inside the
+    // invoke) was rolled back — otherwise journal and LocalHistory skew forever.
+    expect(document.querySelector('[data-redra-id=c1]')).toBeNull();
+    expect(bridge.undo).toHaveBeenCalledTimes(1);
+
+    // No local history entry: a subsequent ⌘Z must not step the journal again.
+    controller.handleUndo();
+    expect(bridge.undo).toHaveBeenCalledTimes(1);
+  });
+
+  it('an insert that does not yield the stamped clone also undoes the journal op', async () => {
+    // Defensive path: the returned fragment fails to materialize as the next
+    // sibling (e.g. content sanitized away by the DOM). Simulate with html
+    // whose root carries the WRONG stamp.
+    bridge.cloneBlock.mockResolvedValueOnce({
+      ok: true,
+      cloneId: 'c9',
+      html: '<p data-redra-id="cX">junk</p>',
+    } as never);
+    hover(document.getElementById('a')!);
+    (handle().querySelector('.dup') as HTMLElement).dispatchEvent(
+      new MouseEvent('click', { bubbles: true }),
+    );
+    await flush();
+
+    expect(bridge.undo).toHaveBeenCalledTimes(1);
+    controller.handleUndo();
+    expect(bridge.undo).toHaveBeenCalledTimes(1); // no local entry was pushed
+  });
+
   it('duplicating the CLONE works too (it carries stamps like any block)', async () => {
     hover(document.getElementById('a')!);
     (handle().querySelector('.dup') as HTMLElement).dispatchEvent(

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { parseDocument } from '../../src/engine/index.js';
+import { describe, expect, it, vi } from 'vitest';
+import { parseDocument, tryApplyOps } from '../../src/engine/index.js';
 import type { Op } from '../../src/engine/index.js';
 import {
   checkOpAgainstActive,
@@ -249,6 +249,115 @@ describe('cloneBlock guards (minted ids, prefix rule, channel split)', () => {
     expect(guardCloneBlock('d1', 'c1-1', 'c2', 'd1', doc, active)).toMatchObject({
       ok: false,
       code: 'blocked-subtree',
+    });
+  });
+
+  // --- guard/save symmetry (review fix): everything the engine rejects at
+  // ⌘S must already be rejected at push. Two formerly-reachable holes:
+  // (a) flat c1-n numbering cannot express "subtree of c1-2" by prefix;
+  // (b) a clone whose TARGET sat inside a pristine block X dies with X's
+  //     editText/deleteBlock, but blockDescendants only walks the pristine
+  //     subtree — clone ids escaped the blocked set.
+
+  describe('(a) ops inside an edited CLONE-DESCENDANT subtree (dry-run residue)', () => {
+    // clone of section r3: c1=section, c1-1=p(a), c1-2=span, c1-3=p(b)
+    const active = [cloneBlock('r3', 'c1'), editText('c1-1')];
+
+    it('the engine rejects the sequence at apply time (the reference behavior)', () => {
+      expect(tryApplyOps(doc, [...active, deleteBlock('c1-2')]).ok).toBe(false);
+      expect(tryApplyOps(doc, [...active, setAttr('c1-2')]).ok).toBe(false);
+      expect(tryApplyOps(doc, [...active, deleteBlock('c1-3')]).ok).toBe(true); // sibling survives
+    });
+
+    it('guardDocPush rejects deleteBlock/setAttr on the consumed descendant', () => {
+      expect(guardDocPush('d1', deleteBlock('c1-2'), 'd1', doc, active)).toMatchObject({
+        ok: false,
+        code: 'blocked-subtree',
+      });
+      expect(guardDocPush('d1', setAttr('c1-2'), 'd1', doc, active)).toMatchObject({
+        ok: false,
+        code: 'blocked-subtree',
+      });
+    });
+
+    it('the sibling clone descendant outside the edited subtree stays legal', () => {
+      expect(guardDocPush('d1', deleteBlock('c1-3'), 'd1', doc, active).ok).toBe(true);
+    });
+  });
+
+  describe('(b) clone minted INSIDE a pristine block that is later edited/deleted', () => {
+    // r4 (p) sits inside r3 (section); the clone lands right after r4 — i.e.
+    // inside r3's subtree — so editText r3 wipes the whole clone.
+    const active = [cloneBlock('r4', 'c1'), editText('r3')];
+
+    it('the engine rejects ops on the wiped clone at apply time', () => {
+      expect(tryApplyOps(doc, [...active, editText('c1')]).ok).toBe(false);
+      expect(tryApplyOps(doc, [...active, deleteBlock('c1-1')]).ok).toBe(false);
+    });
+
+    it('checkOpAgainstActive blocks the clone root and its prefix transitively', () => {
+      expect(checkOpAgainstActive(editText('c1'), active, doc).ok).toBe(false);
+      expect(checkOpAgainstActive(deleteBlock('c1-1'), active, doc).ok).toBe(false);
+      expect(checkOpAgainstActive(moveBlock('r7', 'c1'), active, doc).ok).toBe(false);
+      // unrelated pristine siblings stay legal
+      expect(checkOpAgainstActive(editText('r7'), active, doc).ok).toBe(true);
+    });
+
+    it('guardDocPush rejects with blocked-subtree', () => {
+      expect(guardDocPush('d1', editText('c1'), 'd1', doc, active)).toMatchObject({
+        ok: false,
+        code: 'blocked-subtree',
+      });
+    });
+
+    it('a clone of a DELETED block itself survives (sibling insert, not inside)', () => {
+      // cloneBlock r3 → copy is r3's SIBLING; deleteBlock r3 removes only r3.
+      const after = [cloneBlock('r3', 'c1'), deleteBlock('r3')];
+      expect(tryApplyOps(doc, [...after, editText('c1')]).ok).toBe(true);
+      expect(checkOpAgainstActive(editText('c1'), after, doc).ok).toBe(true);
+      expect(guardDocPush('d1', editText('c1'), 'd1', doc, after).ok).toBe(true);
+    });
+
+    it('chained clones are blocked transitively (clone of a clone inside X)', () => {
+      const chained = [cloneBlock('r4', 'c1'), cloneBlock('c1-1', 'c2'), editText('r3')];
+      expect(tryApplyOps(doc, [...chained, editText('c2')]).ok).toBe(false);
+      expect(checkOpAgainstActive(editText('c2'), chained, doc).ok).toBe(false);
+      expect(checkOpAgainstActive(deleteBlock('c2-1'), chained, doc).ok).toBe(false);
+    });
+
+    it('guardCloneBlock also refuses to clone a wiped clone target', () => {
+      expect(guardCloneBlock('d1', 'c1', 'c2', 'd1', doc, active)).toMatchObject({
+        ok: false,
+        code: 'blocked-subtree',
+      });
+    });
+  });
+
+  describe('dry-run is reserved for clone-referencing ops (perf contract)', () => {
+    const active = [cloneBlock('r3', 'c1')];
+
+    it('a pristine-id op never triggers the dry-run', () => {
+      const dryRun = vi.fn(tryApplyOps);
+      expect(guardDocPush('d1', editText('r4'), 'd1', doc, active, dryRun).ok).toBe(true);
+      expect(guardDocPush('d1', deleteBlock('r7'), 'd1', doc, active, dryRun).ok).toBe(true);
+      expect(dryRun).not.toHaveBeenCalled();
+    });
+
+    it('an op referencing a minted clone id (id or beforeId) does', () => {
+      const dryRun = vi.fn(tryApplyOps);
+      expect(guardDocPush('d1', editText('c1'), 'd1', doc, active, dryRun).ok).toBe(true);
+      expect(dryRun).toHaveBeenCalledTimes(1);
+      expect(guardDocPush('d1', moveBlock('r7', 'c1'), 'd1', doc, active, dryRun).ok).toBe(true);
+      expect(dryRun).toHaveBeenCalledTimes(2);
+    });
+
+    it('a dry-run failure surfaces as blocked-subtree with the engine error', () => {
+      const dryRun = vi.fn(() => ({ ok: false as const, error: 'engine said no' }));
+      expect(guardDocPush('d1', editText('c1'), 'd1', doc, active, dryRun)).toEqual({
+        ok: false,
+        error: 'engine said no',
+        code: 'blocked-subtree',
+      });
     });
   });
 
