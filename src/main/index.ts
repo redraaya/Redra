@@ -57,6 +57,13 @@ const cliFile = cliArgs.find((a) => !a.startsWith('-') && /\.html?$/i.test(a));
 const shotIdx = cliArgs.indexOf('--screenshot');
 const shotPath = shotIdx >= 0 ? (cliArgs[shotIdx + 1] ?? null) : null;
 
+// Redra stores no cookies, passwords or encrypted state, so Chromium's
+// OSCrypt "Safe Storage" key in the macOS keychain serves no purpose — and
+// for an ad-hoc-signed app it pops a keychain-password prompt on launch
+// (the signature isn't a stable trusted identity). `password-store=basic`
+// keeps that key in memory instead of the keychain: no prompt, nothing lost.
+app.commandLine.appendSwitch('password-store', 'basic');
+
 // --- privileged scheme: must happen before app 'ready' -------------------
 registerRedraScheme();
 
