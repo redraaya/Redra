@@ -53,9 +53,11 @@ export interface OpenTimings {
 export type BackupWriter = (filePath: string, bytes: Buffer) => Promise<void>;
 
 /**
- * Owns the currently opened document (single-window v1: re-open replaces it).
- * All Electron-facing wiring (views, dialogs, IPC) lives in index.ts;
- * this class only touches fs + the engine, so it stays thin and portable.
+ * Owns ONE window's opened document — every WindowContext gets its own
+ * instance (one window = one document since v0.3.0; re-open into the same
+ * context replaces the doc, e.g. on version restore). All Electron-facing
+ * wiring (views, dialogs, IPC) lives in index.ts; this class only touches
+ * fs + the engine, so it stays thin and portable.
  */
 export class DocumentManager {
   private current: OpenedDoc | null = null;
@@ -140,7 +142,7 @@ export class DocumentManager {
     return { opened, timings };
   }
 
-  /** Drop the current document (single-window v1: it dies with its window). */
+  /** Drop the document (it dies with its window — see the 'closed' handler). */
   close(): void {
     this.current = null;
   }

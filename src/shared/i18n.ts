@@ -28,6 +28,7 @@ const STRINGS = {
   'menu.quitMac': { ru: 'Завершить Redra', en: 'Quit Redra' },
   'menu.quit': { ru: 'Выход', en: 'Exit' },
   'menu.file': { ru: 'Файл', en: 'File' },
+  'menu.newWindow': { ru: 'Новое окно', en: 'New Window' },
   'menu.open': { ru: 'Открыть…', en: 'Open…' },
   'menu.close': { ru: 'Закрыть окно', en: 'Close Window' },
   'menu.save': { ru: 'Сохранить', en: 'Save' },

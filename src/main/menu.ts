@@ -3,6 +3,8 @@ import type { MenuItemConstructorOptions } from 'electron';
 import type { Translate } from '../shared/i18n.js';
 
 export interface MenuHandlers {
+  /** ⌘N — a new window with the start screen (Redra has no "new document"). */
+  newWindow(): void;
   open(): void;
   save(): void;
   saveAs(): void;
@@ -44,15 +46,6 @@ export interface MenuOptions {
   versions?: VersionMenuItem[];
 }
 
-/** Menu items that only make sense with a document open (start disabled). */
-const DOC_ITEM_IDS = [
-  'file-save',
-  'file-save-as',
-  'file-export-pdf',
-  'file-version-history',
-  'view-preview',
-] as const;
-
 export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void {
   const isMac = process.platform === 'darwin';
   const { t } = options;
@@ -81,6 +74,9 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
   }
 
   const fileSubmenu: MenuItemConstructorOptions[] = [
+    // ⌘N: Redra has no "new document" (it edits existing files), so the
+    // TextEdit-style accelerator opens a new window with the start screen.
+    { label: t('menu.newWindow'), accelerator: 'CmdOrCtrl+N', click: () => handlers.newWindow() },
     { label: t('menu.open'), accelerator: 'CmdOrCtrl+O', click: () => handlers.open() },
     { type: 'separator' },
     // Standard macOS Close (⌘W). The unsaved-changes close guard intercepts
@@ -174,16 +170,6 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
   template.push({ label: t('menu.window'), role: 'windowMenu' });
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-}
-
-/** Enable/disable the document-dependent items (save / save as / pdf / preview). */
-export function setDocMenuEnabled(on: boolean): void {
-  const menu = Menu.getApplicationMenu();
-  if (!menu) return;
-  for (const id of DOC_ITEM_IDS) {
-    const item = menu.getMenuItemById(id);
-    if (item) item.enabled = on;
-  }
 }
 
 /** Keep the .bak checkbox in sync when the setting changes outside the menu. */

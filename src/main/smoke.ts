@@ -1,6 +1,6 @@
 import { app } from 'electron';
 import { validateOp } from './lib/validate-op.js';
-import type { DocumentManager } from './document-manager.js';
+import type { OpenedDoc } from './document-manager.js';
 import type { PerfLog } from './lib/perf.js';
 
 /**
@@ -19,7 +19,8 @@ export class SmokeHarness {
   constructor(
     private readonly active: boolean,
     private readonly perf: PerfLog,
-    private readonly docManager: DocumentManager,
+    /** Smoke drives a single window — the first context's open document. */
+    private readonly getDoc: () => OpenedDoc | null,
   ) {}
 
   /** True when the app runs with --smoke. */
@@ -83,7 +84,7 @@ export class SmokeHarness {
 
   /** SMOKE-mode self-check: validation + journal round-trip on the real doc. */
   private opsRoundtrip(): void {
-    const cur = this.docManager.currentDoc;
+    const cur = this.getDoc();
     if (!cur) return;
     const checked = validateOp({ type: 'editText', id: 'r1', html: '<b>smoke</b>' }, cur.doc);
     if (!checked.ok) {
