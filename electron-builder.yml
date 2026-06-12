@@ -53,3 +53,4 @@ dmg:
       y: 220
       type: link
       path: /Applications
+afterPack: scripts/adhoc-sign.cjs
