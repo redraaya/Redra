@@ -24,6 +24,11 @@
  *   'ops:undo'          (docId: string) → OpUndoResult         — journal.undo
  *   'ops:redo'          (docId: string) → OpUndoResult         — journal.redo
  *   'link:openExternal' (url: string) → void                   — http/https only
+ *   'image:pick'        (docId: string, id: string) → ImageValueResult
+ *                        — open-file dialog → read → base64 data: URI (≤10 MB)
+ *   'image:fromPath'    (docId: string, id: string, path: string) → ImageValueResult
+ *                        — drag-and-dropped file path; main re-validates the
+ *                          extension and size before embedding
  *
  * Every ops call carries the docId from the sender's URL (redra://doc/<docId>/):
  * the doc view WebContents is reused across documents, so main rejects ops
@@ -118,6 +123,16 @@ export type OpPushResult = { ok: true } | { ok: false; error: string };
 export type OpUndoResult = { ok: boolean; dirty: boolean };
 
 /**
+ * Result of 'image:pick' / 'image:fromPath': the value to set as the img's
+ * src — v1 ALWAYS a base64 data: URI, so single-file documents stay
+ * self-contained. canceled = the user closed the picker; error has already
+ * been shown to the user by main (dialog) — the preload just aborts quietly.
+ */
+export type ImageValueResult =
+  | { ok: true; value: string }
+  | { ok: false; canceled?: boolean; error?: string };
+
+/**
  * Bridge the doc preload uses to talk to main. Stays INSIDE the isolated
  * preload world — never exposed to the page (see src/preload/doc.ts).
  * `op` is the engine's Op type; declared structurally here so shared/ stays
@@ -129,6 +144,12 @@ export interface RedraDocBridge {
   undo(): Promise<OpUndoResult>;
   redo(): Promise<OpUndoResult>;
   openExternal(url: string): void;
+  /** Replace image flow: open-file dialog in main → data: URI for img `id`. */
+  pickImage(id: string): Promise<ImageValueResult>;
+  /** Replace image from a drag-and-dropped file path → data: URI for img `id`. */
+  replaceImageFromPath(id: string, path: string): Promise<ImageValueResult>;
+  /** Resolve a dropped File to its filesystem path (webUtils under the hood). */
+  pathForFile(file: File): string;
 }
 
 /** API exposed by the shell preload as window.redra. */

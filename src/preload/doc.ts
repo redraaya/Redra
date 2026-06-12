@@ -7,10 +7,16 @@
  * exactly what contextIsolation protects against; the editing layer and its
  * IPC bridge simply live here as module state instead.
  */
-import { ipcRenderer } from 'electron';
+import { ipcRenderer, webUtils } from 'electron';
 import { createEditorController } from './editor/controller.js';
 import type { EditorController } from './editor/controller.js';
-import type { ModeState, OpPushResult, OpUndoResult, RedraDocBridge } from '../shared/ipc.js';
+import type {
+  ImageValueResult,
+  ModeState,
+  OpPushResult,
+  OpUndoResult,
+  RedraDocBridge,
+} from '../shared/ipc.js';
 
 // The doc view WebContents is REUSED across documents, but this preload
 // re-runs per navigation — so the docId baked into the page URL
@@ -27,6 +33,10 @@ const bridge: RedraDocBridge = {
   openExternal: (url) => {
     void ipcRenderer.invoke('link:openExternal', url);
   },
+  pickImage: (id) => ipcRenderer.invoke('image:pick', docId, id) as Promise<ImageValueResult>,
+  replaceImageFromPath: (id, path) =>
+    ipcRenderer.invoke('image:fromPath', docId, id, path) as Promise<ImageValueResult>,
+  pathForFile: (file) => webUtils.getPathForFile(file),
 };
 
 let controller: EditorController | null = null;

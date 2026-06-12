@@ -71,6 +71,16 @@ const STRINGS = {
   'error.saveTitle': { ru: 'Не удалось сохранить', en: 'Can’t save' },
   'error.pdfTitle': { ru: 'Не удалось экспортировать PDF', en: 'Can’t export PDF' },
   'error.openTitle': { ru: 'Не удалось открыть файл', en: 'Can’t open file' },
+  'error.imageTitle': { ru: 'Не удалось заменить картинку', en: 'Can’t replace image' },
+  'image.tooBig': {
+    ru: 'Картинка слишком большая (макс. 10 МБ)',
+    en: 'Image is too large (max 10 MB)',
+  },
+  'image.badType': {
+    ru: 'Файл не похож на картинку (PNG, JPEG, WebP, GIF, SVG, AVIF)',
+    en: 'The file is not an image (PNG, JPEG, WebP, GIF, SVG, AVIF)',
+  },
+  'dialog.imagesFilter': { ru: 'Картинки', en: 'Images' },
 
   // --- shell renderer (start screen + titlebar) -------------------------------
   'shell.tagline': {
@@ -97,6 +107,7 @@ const STRINGS = {
   // --- doc editing overlay -----------------------------------------------------
   'overlay.drag': { ru: 'Перетащить блок', en: 'Drag block' },
   'overlay.delete': { ru: 'Удалить блок', en: 'Delete block' },
+  'overlay.replaceImage': { ru: 'Заменить картинку', en: 'Replace image' },
 } as const satisfies Record<string, { ru: string; en: string }>;
 
 export type StringKey = keyof typeof STRINGS;

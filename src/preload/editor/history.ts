@@ -10,6 +10,14 @@ export type HistoryEntry =
   | { kind: 'editText'; el: HTMLElement; prevHtml: string; newHtml: string }
   | { kind: 'deleteBlock'; node: Element; parent: Node & ParentNode; nextSibling: Node | null }
   | {
+      kind: 'setAttr';
+      el: Element;
+      name: string;
+      /** Attribute value before the change; null = the attribute was absent. */
+      prevValue: string | null;
+      newValue: string;
+    }
+  | {
       kind: 'moveBlock';
       node: Element;
       parent: Node & ParentNode;
@@ -51,6 +59,10 @@ export class LocalHistory {
       case 'moveBlock':
         entry.parent.insertBefore(entry.node, entry.oldNext);
         break;
+      case 'setAttr':
+        if (entry.prevValue === null) entry.el.removeAttribute(entry.name);
+        else entry.el.setAttribute(entry.name, entry.prevValue);
+        break;
     }
     return true;
   }
@@ -81,6 +93,9 @@ export class LocalHistory {
         break;
       case 'moveBlock':
         entry.parent.insertBefore(entry.node, entry.newNext);
+        break;
+      case 'setAttr':
+        entry.el.setAttribute(entry.name, entry.newValue);
         break;
     }
     return true;

@@ -64,6 +64,38 @@ describe('LocalHistory — DOM inverse stack', () => {
     expect(ids()).toBe('r4,r5,r3');
   });
 
+  it('setAttr: undo restores the previous value, redo re-applies the new one', () => {
+    document.body.innerHTML = '<img data-redra-id="r3" src="old.png">';
+    const img = document.querySelector('img')!;
+    img.setAttribute('src', 'data:image/png;base64,AA');
+    history.push({
+      kind: 'setAttr',
+      el: img,
+      name: 'src',
+      prevValue: 'old.png',
+      newValue: 'data:image/png;base64,AA',
+    });
+
+    expect(history.undo()).toBe(true);
+    expect(img.getAttribute('src')).toBe('old.png');
+
+    expect(history.redo()).toBe(true);
+    expect(img.getAttribute('src')).toBe('data:image/png;base64,AA');
+  });
+
+  it('setAttr with prevValue null: undo REMOVES the attribute', () => {
+    document.body.innerHTML = '<img data-redra-id="r3" alt="no src">';
+    const img = document.querySelector('img')!;
+    img.setAttribute('src', 'new.png');
+    history.push({ kind: 'setAttr', el: img, name: 'src', prevValue: null, newValue: 'new.png' });
+
+    history.undo();
+    expect(img.hasAttribute('src')).toBe(false);
+
+    history.redo();
+    expect(img.getAttribute('src')).toBe('new.png');
+  });
+
   it('undoAndDiscard reverts the DOM and removes the entry entirely (no redo)', () => {
     document.body.innerHTML = '<p data-redra-id="r3">x</p>';
     const p = document.querySelector('p') as HTMLElement;

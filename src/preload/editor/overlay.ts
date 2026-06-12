@@ -70,6 +70,26 @@ const SHADOW_CSS = `
   pointer-events: none;
 }
 .indicator.visible { display: block; }
+.img-chip {
+  all: initial;
+  position: fixed;
+  display: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(28, 27, 25, 0.09);
+  box-shadow: 0 3px 10px rgba(20, 18, 14, 0.12);
+  color: #8a877f;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.img-chip.visible { display: flex; }
+.img-chip:hover { color: #1c1b19; }
 @media (prefers-color-scheme: dark) {
   .handle {
     background: rgba(35, 34, 32, 0.95);
@@ -78,14 +98,27 @@ const SHADOW_CSS = `
   }
   .grip:hover, .trash:hover { color: #eceae6; }
   .indicator { background: rgba(236, 234, 230, 0.4); }
+  .img-chip {
+    background: rgba(35, 34, 32, 0.95);
+    border-color: rgba(236, 234, 230, 0.12);
+    color: #8f8c84;
+  }
+  .img-chip:hover { color: #eceae6; }
 }
 /* printToPDF renders print styles — editor chrome must never reach a PDF.
    (The drag ghost lives OUTSIDE the shadow and cannot exist during export:
    exportPdf commits the edit session first and no drag survives that.) */
 @media print {
-  .handle, .indicator { display: none !important; }
+  .handle, .indicator, .img-chip { display: none !important; }
 }
 `;
+
+const IMAGE_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect x="3" y="3" width="18" height="18" rx="2"/>' +
+  '<circle cx="8.5" cy="8.5" r="1.5"/>' +
+  '<path d="M21 15l-5-5L5 21"/></svg>';
 
 const TRASH_SVG =
   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
@@ -97,6 +130,8 @@ const TRASH_SVG =
 export interface OverlayCallbacks {
   onDelete(): void;
   onGripDown(event: PointerEvent): void;
+  /** Click on the image-replace chip (the hovered <img> is currentImage). */
+  onImageReplace(): void;
 }
 
 export class Overlay {
@@ -104,8 +139,10 @@ export class Overlay {
   private readonly host: HTMLElement;
   private readonly handle: HTMLElement;
   private readonly indicator: HTMLElement;
+  private readonly imgChip: HTMLElement;
   private ghost: HTMLElement | null = null;
   private block: HTMLElement | null = null;
+  private image: HTMLElement | null = null;
 
   constructor(doc: Document, callbacks: OverlayCallbacks) {
     // The isolated world shares navigator.language with the page — both come
@@ -154,6 +191,14 @@ export class Overlay {
     this.indicator.className = 'indicator';
     root.appendChild(this.indicator);
 
+    // Image-replace chip: quiet neutral button at the hovered img's top-right.
+    this.imgChip = doc.createElement('button');
+    this.imgChip.className = 'img-chip';
+    this.imgChip.setAttribute('title', t('overlay.replaceImage'));
+    this.imgChip.innerHTML = IMAGE_SVG;
+    this.imgChip.addEventListener('click', () => callbacks.onImageReplace());
+    root.appendChild(this.imgChip);
+
     doc.documentElement.appendChild(this.host);
   }
 
@@ -168,6 +213,36 @@ export class Overlay {
     return this.block;
   }
 
+  get currentImage(): HTMLElement | null {
+    return this.image;
+  }
+
+  showImageChip(img: HTMLElement): void {
+    this.image = img;
+    this.imgChip.classList.add('visible');
+    this.repositionImageChip();
+  }
+
+  hideImageChip(): void {
+    this.image = null;
+    this.imgChip.classList.remove('visible');
+  }
+
+  /** Anchor the chip INSIDE the img's top-right corner (it overlaps the image). */
+  private repositionImageChip(): void {
+    if (!this.image) return;
+    if (!this.image.isConnected) {
+      this.hideImageChip();
+      return;
+    }
+    const rect = this.image.getBoundingClientRect();
+    const chip = 26;
+    const left = Math.max(rect.left + 4, rect.right - chip - 6);
+    const top = Math.max(6, rect.top + 6);
+    this.imgChip.style.left = `${left}px`;
+    this.imgChip.style.top = `${top}px`;
+  }
+
   showHandle(block: HTMLElement): void {
     this.block = block;
     this.handle.classList.add('visible');
@@ -179,8 +254,9 @@ export class Overlay {
     this.handle.classList.remove('visible');
   }
 
-  /** Re-anchor the handle to the current block (scroll/resize, rAF-throttled by the caller). */
+  /** Re-anchor the floating chrome (scroll/resize, rAF-throttled by the caller). */
   reposition(): void {
+    this.repositionImageChip();
     if (!this.block) return;
     if (!this.block.isConnected) {
       this.hideHandle();

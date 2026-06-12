@@ -68,6 +68,11 @@ export function createEditorController(
         },
       });
     },
+    onImageReplace: () => {
+      const img = overlay.currentImage;
+      if (!img || session || dragging) return;
+      void replaceImageViaPick(img);
+    },
   });
 
   // --- op transport ---------------------------------------------------------
@@ -82,6 +87,70 @@ export function createEditorController(
       console.error('[redra] ops:push rejected:', res.error, op);
       history.undoAndDiscard();
     }
+  }
+
+  // --- image replacement (v0.2.0) -------------------------------------------
+
+  /** The <img data-redra-id> for an event target, or null. */
+  function asReplaceableImage(el: Element): HTMLElement | null {
+    return el.tagName === 'IMG' && el.hasAttribute(REDRA_ID_ATTR) ? (el as HTMLElement) : null;
+  }
+
+  /**
+   * Apply a replacement value to the live img and record it everywhere:
+   * local inverse stack first, then ops:push (a rejected push rolls the DOM
+   * back via undoAndDiscard — same contract as every other op).
+   */
+  function applyImageValue(img: HTMLElement, id: string, value: string): void {
+    const prevValue = img.getAttribute('src');
+    img.setAttribute('src', value);
+    history.push({ kind: 'setAttr', el: img, name: 'src', prevValue, newValue: value });
+    void pushOp({ type: 'setAttr', id, name: 'src', value });
+  }
+
+  async function replaceImageViaPick(img: HTMLElement): Promise<void> {
+    const id = img.getAttribute(REDRA_ID_ATTR);
+    if (!id) return;
+    const res = await bridge.pickImage(id);
+    // Errors were already shown by main's dialog; canceled is just canceled.
+    if (!res.ok) return;
+    applyImageValue(img, id, res.value);
+  }
+
+  /** True when the drag carries OS files (not an in-page text/block drag). */
+  function isFileDrag(e: DragEvent): boolean {
+    const types = e.dataTransfer?.types;
+    return !!types && Array.from(types).includes('Files');
+  }
+
+  function onDragOver(e: DragEvent): void {
+    const target = asElement(e.target);
+    const img = target && asReplaceableImage(target);
+    if (!img || !isFileDrag(e)) return; // not ours — the shell handles .html drops
+    e.preventDefault(); // signals "drop allowed here"
+    e.stopImmediatePropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function onDrop(e: DragEvent): void {
+    const target = asElement(e.target);
+    const img = target && asReplaceableImage(target);
+    if (!img) return;
+    e.preventDefault(); // never let a file drop on an img navigate the view
+    e.stopImmediatePropagation();
+    const id = img.getAttribute(REDRA_ID_ATTR);
+    const file = e.dataTransfer?.files?.[0];
+    if (!id || !file) return;
+    let path = '';
+    try {
+      path = bridge.pathForFile(file);
+    } catch {
+      return; // synthetic File without a backing fs path
+    }
+    if (!path) return;
+    void bridge.replaceImageFromPath(id, path).then((res) => {
+      if (res.ok) applyImageValue(img, id, res.value);
+    });
   }
 
   // --- edit sessions (A1) ----------------------------------------------------
@@ -179,6 +248,7 @@ export function createEditorController(
       hoverBlock = null;
     }
     overlay.hideHandle();
+    overlay.hideImageChip();
   }
 
   function setHover(block: HTMLElement | null): void {
@@ -234,6 +304,16 @@ export function createEditorController(
       return;
     }
 
+    // Click on an original <img>: the replace flow, never a text session.
+    const img = asReplaceableImage(target);
+    if (img) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (session) void endSession(true);
+      void replaceImageViaPick(img);
+      return;
+    }
+
     // Clicking anywhere else first commits the active session.
     if (session) void endSession(true);
 
@@ -247,7 +327,12 @@ export function createEditorController(
     if (session || dragging) return; // block UI is dormant during a session/drag
     const target = asElement(e.target);
     if (!target) return;
-    if (overlay.containsTarget(target)) return; // hovering the pill keeps it alive
+    if (overlay.containsTarget(target)) return; // hovering the pill/chip keeps it alive
+    // Replace affordance for original images: chip at the img's top-right.
+    // The chip overlaps the img rect, so there is no dead gap to cross.
+    const img = asReplaceableImage(target);
+    if (img) overlay.showImageChip(img);
+    else overlay.hideImageChip();
     let block = resolveBlock(target, win);
     // For a NESTED block the trip to the pill crosses its PARENT container,
     // which resolves as a block of its own — without this guard the pill
@@ -323,6 +408,8 @@ export function createEditorController(
     ['mouseout', onMouseOut as EventListener, true],
     ['keydown', onKeyDown as EventListener, true],
     ['focusout', onFocusOut as EventListener, true],
+    ['dragover', onDragOver as EventListener, true],
+    ['drop', onDrop as EventListener, true],
     ['scroll', queueReposition as EventListener, { capture: true, passive: true }],
     ['resize', queueReposition as EventListener, true],
   ];

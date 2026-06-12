@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, shell } fro
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,11 +20,19 @@ import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
 import { guardDocPush } from './lib/op-guard.js';
+import { getElementById } from '../engine/index.js';
+import {
+  buildImageDataUri,
+  IMAGE_EXTENSIONS,
+  isAllowedImagePath,
+  MAX_IMAGE_BYTES,
+} from './lib/image-data.js';
 import { createSaveFlow } from './save-flow.js';
 import { ScreenshotHarness } from './screenshot.js';
 import { SmokeHarness } from './smoke.js';
 import type {
   ExportResult,
+  ImageValueResult,
   OpPushResult,
   OpUndoResult,
   OpenResult,
@@ -612,6 +620,43 @@ function registerIpc(): void {
     broadcastDirty();
     return { ok, dirty: cur.journal.dirty };
   });
+  // --- image replacement (v0.2.0) ---
+  // Both channels answer with the value the preload should set as img.src:
+  // v1 ALWAYS a base64 data: URI (single-file documents stay self-contained;
+  // nothing is copied next to the document). The op itself still arrives via
+  // the guarded ops:push — these channels only turn a file into a value.
+  ipcMain.handle(
+    'image:pick',
+    async (event, docId: unknown, id: unknown): Promise<ImageValueResult> => {
+      if (!fromDoc(event)) return { ok: false, error: 'bad sender' };
+      const guard = guardImageRequest(docId, id);
+      if (guard) return guard;
+      if (!win) return { ok: false, canceled: true };
+      const result = await dialog.showOpenDialog(win, {
+        properties: ['openFile'],
+        filters: [{ name: t('dialog.imagesFilter'), extensions: [...IMAGE_EXTENSIONS] }],
+      });
+      const first = result.filePaths[0];
+      if (result.canceled || !first) return { ok: false, canceled: true };
+      return imageValueFromFile(first);
+    },
+  );
+  ipcMain.handle(
+    'image:fromPath',
+    async (event, docId: unknown, id: unknown, filePath: unknown): Promise<ImageValueResult> => {
+      if (!fromDoc(event)) return { ok: false, error: 'bad sender' };
+      const guard = guardImageRequest(docId, id);
+      if (guard) return guard;
+      if (typeof filePath !== 'string' || filePath.length === 0) {
+        return { ok: false, error: 'bad path' };
+      }
+      if (!isAllowedImagePath(filePath)) {
+        dialog.showErrorBox(t('error.imageTitle'), t('image.badType'));
+        return { ok: false, error: 'not an image' };
+      }
+      return imageValueFromFile(filePath);
+    },
+  );
   ipcMain.handle('link:openExternal', (event, url: unknown) => {
     if (!fromDoc(event)) return;
     if (typeof url !== 'string') return;
@@ -630,4 +675,33 @@ function registerIpc(): void {
     if (!senderMatches(event, docView?.webContents)) return;
     smoke.onEditorReady();
   });
+}
+
+/** Shared image:pick / image:fromPath gate: docId + target element. Null = ok. */
+function guardImageRequest(docId: unknown, id: unknown): ImageValueResult | null {
+  const cur = docManager.currentDoc;
+  if (!cur || docId !== cur.docId) return { ok: false, error: 'stale document' };
+  if (typeof id !== 'string' || !getElementById(cur.doc, id)) {
+    return { ok: false, error: 'unknown element' };
+  }
+  return null;
+}
+
+/** Read + size-cap + embed. User-visible failures get a dialog right here. */
+async function imageValueFromFile(filePath: string): Promise<ImageValueResult> {
+  try {
+    const st = await stat(filePath);
+    if (!st.isFile()) throw new Error(`not a file: ${filePath}`);
+    if (st.size > MAX_IMAGE_BYTES) {
+      dialog.showErrorBox(t('error.imageTitle'), t('image.tooBig'));
+      return { ok: false, error: 'too big' };
+    }
+    const bytes = await readFile(filePath);
+    return { ok: true, value: buildImageDataUri(filePath, bytes) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[image] failed:', message);
+    dialog.showErrorBox(t('error.imageTitle'), message);
+    return { ok: false, error: message };
+  }
 }
