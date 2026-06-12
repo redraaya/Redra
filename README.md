@@ -12,6 +12,15 @@ disk. No code, no broken layout. Or export it to PDF.
 
 ![Redra features](docs/assets/features.png)
 
+**New in v0.3.0:**
+
+- **Multiple windows** — every document opens in its own window (or a native
+  macOS tab); ⌘N adds another.
+- **Block duplication** — a copy button on the block handle clones the block
+  right below the original, styles intact; rewrite the text and done.
+- **Find in document** — ⌘F opens a quiet find bar in the titlebar with
+  native match highlighting and a match counter.
+
 **New in v0.2.0:**
 
 - **Image replacement** — click an image (or drop a file onto it) to swap it;
@@ -87,6 +96,8 @@ Once installed, Redra shows up in Finder's "Open With…" menu for `.html` and
 | Shortcut | Action |
 | --- | --- |
 | ⌘O | Open a file |
+| ⌘N | New window |
+| ⌘F | Find in the document |
 | ⌘S | Save |
 | ⇧⌘S | Save As… |
 | ⌘E | Preview mode (toggles editing on/off) |
@@ -103,8 +114,9 @@ Once installed, Redra shows up in Finder's "Open With…" menu for `.html` and
 - **`transform`/`filter` on `<html>`**: these styles on the root element
   create a new containing block for `position: fixed`, so the block handle
   pill may be positioned with an offset on such pages.
-- One window — one document; relative links to sibling `.html` files are
-  deliberately dead until multi-document support lands.
+- One window — one document (open as many windows as you like); relative
+  links to sibling `.html` files are deliberately dead inside the document
+  view.
 
 ## Build from source
 

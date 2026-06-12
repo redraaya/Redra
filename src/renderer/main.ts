@@ -32,6 +32,7 @@ const btnPreview = $('btn-preview') as HTMLButtonElement;
 const btnPdf = $('btn-pdf') as HTMLButtonElement;
 const btnSave = $('btn-save') as HTMLButtonElement;
 const btnTheme = $('btn-theme') as HTMLButtonElement;
+const btnOpen = $('btn-open') as HTMLButtonElement;
 const btnFind = $('btn-find') as HTMLButtonElement;
 const findBar = $('find-bar');
 const findInput = $('find-input') as HTMLInputElement;
@@ -53,6 +54,7 @@ const t = makeT(lang);
 
 modePill.textContent = t('shell.modePreview');
 btnPreview.title = t('shell.previewTooltip');
+btnOpen.title = t('shell.openTooltip');
 btnFind.title = t('shell.findTooltip');
 findInput.placeholder = t('shell.findPlaceholder');
 findPrev.title = t('shell.findPrev');
@@ -107,6 +109,8 @@ void redra.getSettings().then((s) => applyTheme(s.shellTheme));
 
 // --- titlebar actions ---------------------------------------------------------
 
+// Visible in BOTH states (start screen and doc) — the one always-there action.
+btnOpen.addEventListener('click', () => void redra.openFileDialog());
 btnPreview.addEventListener('click', () => redra.togglePreview());
 btnPdf.addEventListener('click', () => void redra.exportPdf());
 btnSave.addEventListener('click', () => void redra.save());
