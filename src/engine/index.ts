@@ -3,6 +3,6 @@ export type { Document, Element, RedraDoc } from './types.js';
 export { parseDocument, getElementId, getElementById } from './parse.js';
 export { serializeSource, serializeForView } from './serialize.js';
 export { normalizeEditedHtml } from './normalize.js';
-export { RedraOpError } from './ops.js';
-export type { Op, EditTextOp, DeleteBlockOp, MoveBlockOp } from './ops.js';
+export { RedraOpError, SETATTR_ALLOWED_NAMES } from './ops.js';
+export type { Op, EditTextOp, DeleteBlockOp, MoveBlockOp, SetAttrOp } from './ops.js';
 export { Journal } from './journal.js';

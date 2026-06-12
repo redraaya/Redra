@@ -13,6 +13,7 @@ const doc = parseDocument(
 const editText = (id: string, html = 'x'): Op => ({ type: 'editText', id, html });
 const deleteBlock = (id: string): Op => ({ type: 'deleteBlock', id });
 const moveBlock = (id: string, beforeId: string | null): Op => ({ type: 'moveBlock', id, beforeId });
+const setAttr = (id: string, value = 'a.png'): Op => ({ type: 'setAttr', id, name: 'src', value });
 
 describe('checkOpAgainstActive (blocked subtrees, mirrors applyOps)', () => {
   it('rejects deleteBlock on a descendant of an edited element', () => {
@@ -53,6 +54,18 @@ describe('checkOpAgainstActive (blocked subtrees, mirrors applyOps)', () => {
     expect(checkOpAgainstActive(deleteBlock('r7'), [editText('r3')], doc).ok).toBe(true);
   });
 
+  it('rejects setAttr on a target inside an edited/deleted subtree', () => {
+    expect(checkOpAgainstActive(setAttr('r5'), [editText('r3')], doc).ok).toBe(false);
+    expect(checkOpAgainstActive(setAttr('r4'), [deleteBlock('r3')], doc).ok).toBe(false);
+    expect(checkOpAgainstActive(setAttr('r3'), [deleteBlock('r3')], doc).ok).toBe(false);
+  });
+
+  it('allows setAttr on unrelated elements and on an edited element itself', () => {
+    expect(checkOpAgainstActive(setAttr('r7'), [editText('r3')], doc).ok).toBe(true);
+    // editText replaces CHILDREN; the element itself stays addressable.
+    expect(checkOpAgainstActive(setAttr('r3'), [editText('r3')], doc).ok).toBe(true);
+  });
+
   it('lifts the block when the blocking op is no longer active (undo)', () => {
     const op = deleteBlock('r4');
     // Journal before undo: editText r3 is active → blocked.
@@ -81,6 +94,17 @@ describe('guardDocPush (full ops:push gate)', () => {
       false,
     );
     expect(guardDocPush('d1', raw, 'd1', doc, [deleteBlock('r3')]).ok).toBe(false);
+  });
+
+  it('gates setAttr the same way: shape, blocked subtree, docId', () => {
+    const rawSet = { type: 'setAttr', id: 'r4', name: 'src', value: 'data:image/png;base64,AA' };
+    expect(guardDocPush('d1', rawSet, 'd1', doc, [])).toEqual({
+      ok: true,
+      op: { type: 'setAttr', id: 'r4', name: 'src', value: 'data:image/png;base64,AA' },
+    });
+    expect(guardDocPush('d1', rawSet, 'd1', doc, [deleteBlock('r3')]).ok).toBe(false);
+    expect(guardDocPush('stale', rawSet, 'd1', doc, []).ok).toBe(false);
+    expect(guardDocPush('d1', { ...rawSet, name: 'onerror' }, 'd1', doc, []).ok).toBe(false);
   });
 });
 
