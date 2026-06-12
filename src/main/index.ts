@@ -1,5 +1,5 @@
-import { app, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, shell } from 'electron';
-import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, session, shell } from 'electron';
+import type { IpcMainEvent, IpcMainInvokeEvent, Session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, stat } from 'node:fs/promises';
@@ -60,9 +60,12 @@ const shotPath = shotIdx >= 0 ? (cliArgs[shotIdx + 1] ?? null) : null;
 // Redra stores no cookies, passwords or encrypted state, so Chromium's
 // OSCrypt "Safe Storage" key in the macOS keychain serves no purpose — and
 // for an ad-hoc-signed app it pops a keychain-password prompt on launch
-// (the signature isn't a stable trusted identity). `password-store=basic`
-// keeps that key in memory instead of the keychain: no prompt, nothing lost.
-app.commandLine.appendSwitch('password-store', 'basic');
+// (the signature isn't a stable trusted identity). On macOS only
+// `use-mock-keychain` actually keeps OSCrypt out of the keychain
+// (`password-store` is Linux-only and ignored here); it backs Safe Storage
+// with an in-memory mock — no prompt, and we persist nothing that needs it.
+app.commandLine.appendSwitch('use-mock-keychain');
+app.commandLine.appendSwitch('password-store', 'basic'); // harmless; covers a future Linux build
 
 // --- privileged scheme: must happen before app 'ready' -------------------
 registerRedraScheme();
@@ -73,6 +76,8 @@ const smoke = new SmokeHarness(SMOKE, perf, docManager);
 const shot = new ScreenshotHarness(shotPath);
 let recents: RecentsStore;
 let settingsStore: SettingsStore;
+/** In-memory session shared by the shell window and the doc view (no disk state, no keychain). */
+let appSession: Session | null = null;
 /** Central session backups folder (userData/backups) — set in onReady. */
 let backupsDir = '';
 let backupStore: BackupStore | null = null;
@@ -236,7 +241,15 @@ async function onReady(): Promise<void> {
   // app.getLocale() is only meaningful after 'ready'.
   t = makeT(pickLang(app.getLocale()));
 
-  installRedraProtocolHandler((docId) => docManager.getServed(docId));
+  // ALL Redra sessions live in memory only (no "persist:" prefix). Redra
+  // keeps no cookies, no logins, no site state — and a purely in-memory
+  // session means Chromium never creates an on-disk cookie store, never
+  // initializes OSCrypt, and therefore never has a reason to touch the
+  // macOS keychain. Together with use-mock-keychain above this is the
+  // belt-and-braces guarantee that Redra asks for NO system permissions.
+  appSession = session.fromPartition('redra-ephemeral');
+
+  installRedraProtocolHandler(appSession.protocol, (docId) => docManager.getServed(docId));
 
   recents = new RecentsStore(path.join(app.getPath('userData'), 'recents.json'));
   await recents.load();
@@ -308,6 +321,7 @@ function createWindow(readyAt: number): void {
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/shell.cjs'),
+      session: appSession ?? undefined,
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -366,6 +380,7 @@ function ensureDocView(): WebContentsView {
   const view = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, '../preload/doc.cjs'),
+      session: appSession ?? undefined,
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,

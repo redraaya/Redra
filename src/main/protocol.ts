@@ -29,9 +29,16 @@ export function registerRedraScheme(): void {
  * Install the redra:// handler (call after app 'ready', before any doc loads).
  *   redra://doc/<docId>/                → stamped HTML (utf-8)
  *   redra://doc/<docId>/<relative/path> → file resolved inside the doc's directory
+ *
+ * `target` is the protocol module of the session that will load documents —
+ * Redra uses an in-memory session, so the handler must be installed on THAT
+ * session's protocol, not the default one.
  */
-export function installRedraProtocolHandler(getDoc: (docId: string) => ServedDoc | undefined): void {
-  protocol.handle(REDRA_SCHEME, async (request) => {
+export function installRedraProtocolHandler(
+  target: Pick<typeof protocol, 'handle'>,
+  getDoc: (docId: string) => ServedDoc | undefined,
+): void {
+  target.handle(REDRA_SCHEME, async (request) => {
     let url: URL;
     try {
       url = new URL(request.url);
