@@ -33,7 +33,7 @@ import {
 import { createSaveFlow } from './save-flow.js';
 import { ScreenshotHarness } from './screenshot.js';
 import { SmokeHarness } from './smoke.js';
-import { ContextRegistry, WindowContext, chooseOpenTarget } from './window-context.js';
+import { ContextRegistry, WindowContext, chooseOpenTarget, isFreeForOpen } from './window-context.js';
 import type {
   CloneBlockResult,
   ExportResult,
@@ -179,6 +179,10 @@ const menuHandlers = {
   },
 };
 
+/** Monotonic token: rapid focus switches start overlapping rebuilds, and the
+ * slowest readdir must not install a menu for a window no longer focused. */
+let menuRebuildSeq = 0;
+
 /**
  * (Re)build the whole application menu for the FOCUSED window's state.
  * Electron menus are static once set, and "Version History" is data-driven —
@@ -186,6 +190,7 @@ const menuHandlers = {
  * close and after every backup write. Cheap: a readdir + template build.
  */
 async function rebuildAppMenu(): Promise<void> {
+  const token = ++menuRebuildSeq;
   // Startup fallback: the first window may not be focused yet (it shows
   // asynchronously) — with exactly one window there is no ambiguity.
   const ctx = focusedCtx() ?? (registry.size === 1 ? registry.all()[0]! : null);
@@ -201,6 +206,9 @@ async function rebuildAppMenu(): Promise<void> {
       return { label: `${dateLabel} · ${kb} ${t('unit.kb')}`, dateLabel, backupPath: e.path };
     });
   }
+  // A newer rebuild raced past this one while the backup list was awaited —
+  // its state is fresher; installing ours would clobber it.
+  if (token !== menuRebuildSeq) return;
   buildAppMenu(menuHandlers, {
     backupChecked: settingsStore.get().backupOnFirstSave,
     t,
@@ -260,6 +268,12 @@ async function restoreVersion(ctx: WindowContext, v: VersionMenuItem): Promise<v
     const view = ensureDocView(ctx);
     await view.webContents.loadURL(`redra://doc/${opened.docId}/`);
     setPreview(ctx, false); // restored documents open in live editing, like any open
+    // Same event as a fresh open: the shell re-syncs its doc state and resets
+    // transient UI (the find bar's stale counter included) for the new content.
+    sendToShell(ctx, 'doc:opened', {
+      path: opened.filePath,
+      name: path.basename(opened.filePath),
+    });
     broadcastDirty(ctx);
     void rebuildAppMenu(); // the pre-restore snapshot just added a version
   } catch (err) {
@@ -463,6 +477,12 @@ function createWindowContext(readyAt?: number): WindowContext {
     // holding this context see no doc, and the registry stops resolving the
     // docId (protocol → 404) and the IPC sender ids.
     ctx.docManager.close();
+    // The doc view is a CHILD view, not the window's own webContents — tear
+    // its webContents down explicitly instead of relying on the Electron
+    // version's WebContentsView GC behavior.
+    const docWc = ctx.docView?.webContents;
+    if (docWc && !docWc.isDestroyed()) docWc.close();
+    ctx.docView = null;
     registry.remove(ctx);
     void rebuildAppMenu(); // the focused-window state the menu mirrors changed
   });
@@ -515,6 +535,14 @@ function ensureDocView(ctx: WindowContext): WebContentsView {
       activeMatchOrdinal: result.activeMatchOrdinal,
       matches: result.matches,
     });
+  });
+
+  // A find session does not survive the page it ran in: stop the native
+  // search on any real main-frame navigation (doc reload, version restore)
+  // so no stale highlights or late found-in-page events leak into the next
+  // document state. The shell resets its bar on 'doc:opened' in parallel.
+  wc.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) wc.stopFindInPage('clearSelection');
   });
 
   // Navigation policy: http(s) → external browser; same-doc redra:// root
@@ -713,13 +741,20 @@ async function openDocument(filePath: string, prefer?: WindowContext): Promise<O
   }
 
   const isFree = (c: WindowContext): boolean =>
-    !c.docManager.currentDoc && !c.saveFlow.isCloseFlowActive();
+    isFreeForOpen({
+      hasDoc: !!c.docManager.currentDoc,
+      closeFlowActive: c.saveFlow.isCloseFlowActive(),
+      opening: c.opening,
+    });
   const target =
     prefer && registry.byShellWcId(prefer.shellWcId) === prefer && isFree(prefer)
       ? prefer
       : chooseOpenTarget(focusedCtx(), registry.all(), isFree);
   const ctx = target ?? createWindowContext();
   const createdFresh = target === null;
+  // Busy until dm.open + loadURL settle: a second quick open must route to
+  // another (or a new) window instead of racing this context's manager.
+  ctx.opening = true;
 
   const t0 = performance.now();
   try {
@@ -755,6 +790,8 @@ async function openDocument(filePath: string, prefer?: WindowContext): Promise<O
     // empty window — close it (user-created start screens are kept).
     if (createdFresh && !ctx.win.isDestroyed() && !ctx.docManager.currentDoc) ctx.win.destroy();
     return { ok: false, error: message };
+  } finally {
+    ctx.opening = false;
   }
 }
 

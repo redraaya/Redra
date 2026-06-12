@@ -187,6 +187,12 @@ redra.onDocOpened((info) => {
   titleApp.hidden = true;
   titleDoc.hidden = false;
   docName.textContent = info.name;
+  // New document content (open or version restore): a kept find query and
+  // its counter would be stale — reset the bar (main already stopped the
+  // native search on the doc view's navigation).
+  findModel.reset();
+  findInput.value = '';
+  syncFindBar();
   // Start screen → doc state: theme button yields to the document actions.
   btnTheme.hidden = true;
   for (const b of [btnFind, btnPreview, btnPdf, btnSave]) b.hidden = false;

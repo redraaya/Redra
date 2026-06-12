@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ContextRegistry, chooseOpenTarget, pathsEqual } from '../../src/main/window-context.js';
+import {
+  ContextRegistry,
+  chooseOpenTarget,
+  isFreeForOpen,
+  pathsEqual,
+} from '../../src/main/window-context.js';
 import type { ContextLike } from '../../src/main/window-context.js';
 
 /** Minimal fake context — the registry only sees the structural interface. */
@@ -130,5 +135,31 @@ describe('chooseOpenTarget (open-flow routing)', () => {
     const a: Entry = { name: 'a', free: false };
     expect(chooseOpenTarget(null, [a], isFree)).toBeNull();
     expect(chooseOpenTarget<Entry>(null, [], isFree)).toBeNull();
+  });
+});
+
+describe('isFreeForOpen (the open-routing busy rule)', () => {
+  const free = { hasDoc: false, closeFlowActive: false, opening: false };
+
+  it('a plain start screen is free', () => {
+    expect(isFreeForOpen(free)).toBe(true);
+  });
+
+  it('a document, a close dialog or an open IN FLIGHT each make it busy', () => {
+    expect(isFreeForOpen({ ...free, hasDoc: true })).toBe(false);
+    expect(isFreeForOpen({ ...free, closeFlowActive: true })).toBe(false);
+    expect(isFreeForOpen({ ...free, opening: true })).toBe(false);
+  });
+
+  it('two quick opens: the second routes past the window already opening', () => {
+    // The first open marked `focused` opening (its dm.open is awaited);
+    // before it resolves a second open arrives — it must NOT reuse the
+    // same context (two opens racing one DocumentManager).
+    type Ctx = { hasDoc: boolean; closeFlowActive: boolean; opening: boolean };
+    const focused: Ctx = { ...free, opening: true };
+    const spare: Ctx = { ...free };
+    expect(chooseOpenTarget(focused, [focused, spare], isFreeForOpen)).toBeNull();
+    // ...and with no focused window it falls through to a genuinely free one.
+    expect(chooseOpenTarget(null, [focused, spare], isFreeForOpen)).toBe(spare);
   });
 });

@@ -150,6 +150,8 @@ Each stage: an **implementer agent** works from the stage spec → a **reviewer 
 5. Moving blocks between containers (moveBlock with newParent).
 6. Search ⌘F.
 
+DECISION (v0.3.0, block duplication): cloned blocks keep the user's `id=` attributes verbatim — source fidelity comes first; duplicate anchors are the semantics of the user's own document, not ours to "fix".
+
 **Stage 6 — Markdown mode** (a separate large plan): the same "edits over the source" principle for .md; rendering with OUR typography (starts with a design concept for approval); live editing with no modes; mapping operations back into Markdown syntax.
 
 **Deliberately NOT doing:** opening PDFs (PDF is an output, not an input); creating documents from scratch and templates (competing with Notion/Word outside our niche); a Notion-style block-insert menu.

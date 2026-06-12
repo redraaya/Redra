@@ -50,6 +50,15 @@ export class FindBarModel {
     return [{ kind: 'stop' }];
   }
 
+  /** 'doc:opened' (fresh open or version restore): the document the search
+   *  ran in is gone — close the bar and drop the query AND the counter. No
+   *  commands: main already stopped the native search on navigation. */
+  reset(): void {
+    this._open = false;
+    this._text = '';
+    this._result = null;
+  }
+
   /** Every input edit: restart the search, or stop it on an emptied query. */
   setText(text: string): FindCommand[] {
     this._text = text;

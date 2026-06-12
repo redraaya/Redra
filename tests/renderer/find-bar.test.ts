@@ -36,6 +36,27 @@ describe('FindBarModel — open/close', () => {
   });
 });
 
+describe('FindBarModel — reset on doc:opened (reload / version restore)', () => {
+  it('closes the bar and drops BOTH the query and the stale counter', () => {
+    model.openBar();
+    model.setText('итог');
+    model.applyResult({ activeMatchOrdinal: 3, matches: 17 });
+    model.reset();
+    expect(model.open).toBe(false);
+    expect(model.text).toBe(''); // unlike close(), the query does not survive a new document
+    expect(model.counter).toBe('');
+  });
+
+  it('emits no commands — main already stopped the search on navigation', () => {
+    model.openBar();
+    model.setText('q');
+    expect(model.reset()).toBeUndefined();
+    // and a late result from the dead search is ignored as usual
+    model.applyResult({ activeMatchOrdinal: 1, matches: 2 });
+    expect(model.counter).toBe('');
+  });
+});
+
 describe('FindBarModel — typing', () => {
   beforeEach(() => model.openBar());
 

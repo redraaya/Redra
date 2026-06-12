@@ -35,6 +35,9 @@ export class WindowContext implements ContextLike {
   docViewWcId: number | null = null;
   /** Preview state — single source of truth for THIS window. */
   previewOn = false;
+  /** True while openDocument is loading a file into this window — a second
+   * quick open must not also pick it (two opens racing one DocumentManager). */
+  opening = false;
   saveFlow!: SaveFlow;
 
   constructor(
@@ -67,6 +70,20 @@ export function pathsEqual(
   if (a === b) return true;
   if (platform === 'darwin' || platform === 'win32') return a.toLowerCase() === b.toLowerCase();
   return false;
+}
+
+/**
+ * The open-routing "is this window free to receive a document" rule, pure
+ * for tests: free = start screen (no doc), no close dialog up, and no OTHER
+ * open already in flight (`opening` covers the await inside dm.open — two
+ * quick opens must never land in one window).
+ */
+export function isFreeForOpen(state: {
+  hasDoc: boolean;
+  closeFlowActive: boolean;
+  opening: boolean;
+}): boolean {
+  return !state.hasDoc && !state.closeFlowActive && !state.opening;
 }
 
 /**
