@@ -155,3 +155,58 @@ describe('senderMatches', () => {
     expect(senderMatches({ sender: null }, null)).toBe(false);
   });
 });
+
+describe('validateOp: cloneBlock and minted clone ids', () => {
+  const minted = new Set(['c1']);
+
+  it('accepts a well-formed cloneBlock and returns a fresh sanitized op', () => {
+    const raw = { type: 'cloneBlock', id: 'r4', cloneId: 'c1', junk: true };
+    const res = validateOp(raw, doc);
+    expect(res).toEqual({ ok: true, op: { type: 'cloneBlock', id: 'r4', cloneId: 'c1' } });
+    if (res.ok) expect(res.op).not.toBe(raw);
+  });
+
+  it('rejects cloneBlock with a malformed cloneId', () => {
+    for (const bad of ['x1', 'c', 'c1-2', 'r5', '', 7, null, undefined]) {
+      expect(validateOp({ type: 'cloneBlock', id: 'r4', cloneId: bad }, doc).ok).toBe(false);
+    }
+  });
+
+  it('rejects cloneBlock whose cloneId is already minted by an active clone', () => {
+    expect(validateOp({ type: 'cloneBlock', id: 'r4', cloneId: 'c1' }, doc, minted).ok).toBe(false);
+    expect(validateOp({ type: 'cloneBlock', id: 'r4', cloneId: 'c2' }, doc, minted).ok).toBe(true);
+  });
+
+  it('accepts ops targeting minted roots and their -n descendants (prefix rule)', () => {
+    expect(validateOp({ type: 'editText', id: 'c1', html: 'x' }, doc, minted).ok).toBe(true);
+    expect(validateOp({ type: 'deleteBlock', id: 'c1-7' }, doc, minted).ok).toBe(true);
+    expect(validateOp({ type: 'moveBlock', id: 'c1', beforeId: 'r4' }, doc, minted).ok).toBe(true);
+  });
+
+  it('rejects clone-shaped ids that no active cloneBlock minted', () => {
+    expect(validateOp({ type: 'editText', id: 'c2', html: 'x' }, doc, minted).ok).toBe(false);
+    expect(validateOp({ type: 'editText', id: 'c2-1', html: 'x' }, doc, minted).ok).toBe(false);
+    expect(validateOp({ type: 'editText', id: 'c1', html: 'x' }, doc).ok).toBe(false);
+  });
+
+  it('skips node-shape checks for minted targets (engine enforces at apply)', () => {
+    // moveBlock sibling check needs both nodes — minted side skips it
+    expect(validateOp({ type: 'moveBlock', id: 'c1', beforeId: 'r1' }, doc, minted).ok).toBe(true);
+    // setAttr <img> check needs the node — minted target passes the shape gate,
+    // the value whitelist still applies in full
+    expect(
+      validateOp(
+        { type: 'setAttr', id: 'c1-2', name: 'src', value: 'data:image/png;base64,AA' },
+        doc,
+        minted,
+      ).ok,
+    ).toBe(true);
+    expect(
+      validateOp({ type: 'setAttr', id: 'c1-2', name: 'src', value: 'javascript:x' }, doc, minted)
+        .ok,
+    ).toBe(false);
+    expect(
+      validateOp({ type: 'setAttr', id: 'c1-2', name: 'onerror', value: 'x' }, doc, minted).ok,
+    ).toBe(false);
+  });
+});

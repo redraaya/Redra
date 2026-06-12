@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { parseDocument } from '../../src/engine/index.js';
 import type { Op } from '../../src/engine/index.js';
-import { checkOpAgainstActive, guardDocPush } from '../../src/main/lib/op-guard.js';
+import {
+  checkOpAgainstActive,
+  guardCloneBlock,
+  guardDocPush,
+  mintedCloneRoots,
+} from '../../src/main/lib/op-guard.js';
 
 // <html>=r0 <head>=r1 <body>=r2 <section>=r3 <p>=r4 <span>=r5 <p>=r6 <div>=r7 <img>=r8
 const doc = parseDocument(
@@ -158,5 +163,99 @@ describe('checkOpAgainstActive: template content (mirrors engine markSubtreeRemo
   it('still allows re-editText on the template itself and ops on siblings', () => {
     expect(checkOpAgainstActive(editText(tpl), [editText(tpl)], tdoc).ok).toBe(true);
     expect(checkOpAgainstActive(editText('r6'), [editText(tpl)], tdoc).ok).toBe(true);
+  });
+});
+
+describe('cloneBlock guards (minted ids, prefix rule, channel split)', () => {
+  const cloneBlock = (id: string, cloneId: string): Op => ({ type: 'cloneBlock', id, cloneId });
+
+  it('guardDocPush rejects cloneBlock on the ops:push channel (minting is main-only)', () => {
+    const res = guardDocPush('d1', { type: 'cloneBlock', id: 'r3', cloneId: 'c1' }, 'd1', doc, []);
+    expect(res).toMatchObject({ ok: false, code: 'invalid' });
+  });
+
+  it('guardCloneBlock accepts a valid target and returns the sanitized op', () => {
+    expect(guardCloneBlock('d1', 'r3', 'c1', 'd1', doc, [])).toEqual({
+      ok: true,
+      op: { type: 'cloneBlock', id: 'r3', cloneId: 'c1' },
+    });
+  });
+
+  it('guardCloneBlock rejects stale docId / unknown target / blocked target', () => {
+    expect(guardCloneBlock('old', 'r3', 'c1', 'd1', doc, [])).toMatchObject({
+      ok: false,
+      code: 'stale-doc',
+    });
+    expect(guardCloneBlock('d1', 'r999', 'c1', 'd1', doc, [])).toMatchObject({
+      ok: false,
+      code: 'invalid',
+    });
+    expect(guardCloneBlock('d1', 42, 'c1', 'd1', doc, [])).toMatchObject({
+      ok: false,
+      code: 'invalid',
+    });
+    // r4 sits inside deleted r3 → blocked, like any other op.
+    expect(guardCloneBlock('d1', 'r4', 'c1', 'd1', doc, [deleteBlock('r3')])).toMatchObject({
+      ok: false,
+      code: 'blocked-subtree',
+    });
+  });
+
+  it('guardCloneBlock rejects a cloneId already used by an active cloneBlock', () => {
+    expect(
+      guardCloneBlock('d1', 'r6', 'c1', 'd1', doc, [cloneBlock('r3', 'c1')]),
+    ).toMatchObject({ ok: false, code: 'invalid' });
+    // a fresh cloneId is fine, cloning the clone included
+    expect(guardCloneBlock('d1', 'c1', 'c2', 'd1', doc, [cloneBlock('r3', 'c1')]).ok).toBe(true);
+  });
+
+  it('ops targeting minted ids pass the existence check (root and -n descendants)', () => {
+    const active = [cloneBlock('r3', 'c1')];
+    expect(guardDocPush('d1', editText('c1'), 'd1', doc, active).ok).toBe(true);
+    expect(guardDocPush('d1', editText('c1-2'), 'd1', doc, active).ok).toBe(true);
+    expect(guardDocPush('d1', deleteBlock('c1'), 'd1', doc, active).ok).toBe(true);
+    // ids of a NEVER-minted root stay unknown
+    expect(guardDocPush('d1', editText('c2'), 'd1', doc, active).ok).toBe(false);
+    expect(guardDocPush('d1', editText('c2-1'), 'd1', doc, active).ok).toBe(false);
+    // without the active cloneBlock nothing is minted
+    expect(guardDocPush('d1', editText('c1'), 'd1', doc, []).ok).toBe(false);
+  });
+
+  it('deleteBlock on a clone ROOT blocks the root and its whole prefix subtree', () => {
+    const active = [cloneBlock('r3', 'c1'), deleteBlock('c1')];
+    expect(checkOpAgainstActive(editText('c1'), active, doc).ok).toBe(false);
+    expect(checkOpAgainstActive(editText('c1-3'), active, doc).ok).toBe(false);
+    expect(checkOpAgainstActive(moveBlock('r6', 'c1'), active, doc).ok).toBe(false);
+    // sibling pristine ops stay legal
+    expect(checkOpAgainstActive(editText('r7'), active, doc).ok).toBe(true);
+  });
+
+  it('editText on a clone ROOT blocks descendants by prefix, the root stays legal', () => {
+    const active = [cloneBlock('r3', 'c1'), editText('c1')];
+    expect(checkOpAgainstActive(editText('c1-1'), active, doc).ok).toBe(false);
+    expect(checkOpAgainstActive(editText('c1'), active, doc).ok).toBe(true);
+    expect(checkOpAgainstActive(deleteBlock('c1'), active, doc).ok).toBe(true);
+  });
+
+  it('deleteBlock on a clone DESCENDANT blocks the exact id (subtree residue is the engine’s)', () => {
+    const active = [cloneBlock('r3', 'c1'), deleteBlock('c1-2')];
+    expect(checkOpAgainstActive(editText('c1-2'), active, doc).ok).toBe(false);
+    // siblings inside the clone stay legal here — applyOps owns the rest
+    expect(checkOpAgainstActive(editText('c1-1'), active, doc).ok).toBe(true);
+  });
+
+  it('cloneBlock targets are subject to the blocked-subtree rule via guardCloneBlock', () => {
+    const active = [cloneBlock('r3', 'c1'), deleteBlock('c1')];
+    expect(guardCloneBlock('d1', 'c1-1', 'c2', 'd1', doc, active)).toMatchObject({
+      ok: false,
+      code: 'blocked-subtree',
+    });
+  });
+
+  it('mintedCloneRoots collects exactly the active cloneIds', () => {
+    expect(mintedCloneRoots([])).toEqual(new Set());
+    expect(mintedCloneRoots([cloneBlock('r3', 'c1'), editText('r4'), cloneBlock('c1', 'c2')])).toEqual(
+      new Set(['c1', 'c2']),
+    );
   });
 });
