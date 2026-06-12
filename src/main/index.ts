@@ -141,6 +141,10 @@ async function rebuildAppMenu(): Promise<void> {
 async function restoreVersion(v: VersionMenuItem): Promise<void> {
   const w = win;
   if (!docManager.currentDoc || !w) return;
+  // Captured BEFORE any await: the dialogs below keep the menu/window alive,
+  // so the user can open a DIFFERENT document mid-flow — document A's backup
+  // must never be restored over document B (see the re-check further down).
+  const expectedDocId = docManager.currentDoc.docId;
   // Menu entries are ours, but never read a restore source from outside the store.
   if (!path.resolve(v.backupPath).startsWith(backupsDir + path.sep)) return;
   await commitActiveEdit();
@@ -164,8 +168,13 @@ async function restoreVersion(v: VersionMenuItem): Promise<void> {
     cancelId: 1,
   });
   if (response !== 0) return;
+  // Stale-document re-check: three dialogs were awaited above — if the user
+  // opened another document meanwhile, this restore belongs to a document
+  // that is no longer current. Abort silently (the belt-and-braces check
+  // inside openFromBackup would throw the same way).
+  if (docManager.currentDoc?.docId !== expectedDocId) return;
   try {
-    const { opened } = await docManager.openFromBackup(v.backupPath);
+    const { opened } = await docManager.openFromBackup(v.backupPath, expectedDocId);
     const view = ensureDocView();
     await view.webContents.loadURL(`redra://doc/${opened.docId}/`);
     setPreview(false); // restored documents open in live editing, like any open
@@ -686,11 +695,28 @@ function registerIpc(): void {
     const checked = guardDocPush(docId, raw, cur.docId, cur.doc, cur.journal.ops);
     if (!checked.ok) {
       console.error('[ops] rejected push:', checked.error);
-      return { ok: false, error: checked.error };
+      // Localized HERE (main owns the locale); the preload only relays it.
+      // 'stale-doc' stays silent on purpose: the op belongs to a document
+      // that was replaced — there is nothing the user did wrong just now.
+      const userMessage =
+        checked.code === 'blocked-subtree'
+          ? t('notice.blockedBlock')
+          : checked.code === 'invalid'
+            ? t('notice.opRejected')
+            : undefined;
+      return { ok: false, error: checked.error, code: checked.code, userMessage };
     }
     cur.journal.push(checked.op);
     broadcastDirty();
     return { ok: true };
+  });
+  // A rejected push the preload rolled back: forward main's own localized
+  // text to the shell as a transient toast. Length-capped defense in depth —
+  // the doc preload only ever echoes a userMessage main produced above.
+  ipcMain.on('ops:rejected-notice', (event, message: unknown) => {
+    if (!senderMatches(event, docView?.webContents)) return;
+    if (typeof message !== 'string' || message.length === 0 || message.length > 500) return;
+    win?.webContents.send('notice:show', { text: message });
   });
   ipcMain.handle('ops:undo', (event, docId: unknown): OpUndoResult => {
     if (!fromDoc(event)) return { ok: false, dirty: false };
@@ -765,13 +791,18 @@ function registerIpc(): void {
   });
 }
 
-/** Shared image:pick / image:fromPath gate: docId + target element. Null = ok. */
+/**
+ * Shared image:pick / image:fromPath gate: docId + target element, which
+ * must be an <img> — same rule validateOp enforces for the setAttr op, so
+ * a compromised preload cannot use these channels to read files on behalf
+ * of a non-image element. Null = ok.
+ */
 function guardImageRequest(docId: unknown, id: unknown): ImageValueResult | null {
   const cur = docManager.currentDoc;
   if (!cur || docId !== cur.docId) return { ok: false, error: 'stale document' };
-  if (typeof id !== 'string' || !getElementById(cur.doc, id)) {
-    return { ok: false, error: 'unknown element' };
-  }
+  const el = typeof id === 'string' ? getElementById(cur.doc, id) : undefined;
+  if (!el) return { ok: false, error: 'unknown element' };
+  if (el.tagName !== 'img') return { ok: false, error: 'target is not an <img>' }; // parse5 tagNames are lowercase
   return null;
 }
 

@@ -92,9 +92,12 @@ export function createEditorController(
       // Main is the source of truth: the journal never recorded this op, so
       // the matching local entry (pushed just before this call) must go too —
       // revert the DOM via its stored inverse and drop it from the stack.
-      // User-visible: the action bounces back. Correct v1 behaviour.
+      // The action visibly bounces back; main's localized userMessage (when
+      // present — stale-doc rejections stay silent) becomes a shell toast so
+      // the bounce is never a mystery.
       console.error('[redra] ops:push rejected:', res.error, op);
       history.undoAndDiscard();
+      if (res.userMessage) bridge.notifyRejected(res.userMessage);
     }
   }
 

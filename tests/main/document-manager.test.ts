@@ -206,6 +206,26 @@ describe('DocumentManager.openFromBackup (version history restore)', () => {
     expect(dm.currentDoc).toBe(before);
     expect(dm.isDirty()).toBe(false);
   });
+
+  it('rejects a stale expectedDocId — the document was swapped mid-flow — and touches nothing', async () => {
+    const { dm, backupPath, backups } = await setupEditedDoc();
+    const before = dm.currentDoc!;
+    const backupsBefore = backups.length;
+
+    await expect(dm.openFromBackup(backupPath, 'stale-doc-id')).rejects.toThrow();
+
+    // Untouched: same document object, no dirty flag, no extra safety backup.
+    expect(dm.currentDoc).toBe(before);
+    expect(dm.isDirty()).toBe(false);
+    expect(backups).toHaveLength(backupsBefore);
+  });
+
+  it('proceeds when expectedDocId matches the current document', async () => {
+    const { dm, backupPath } = await setupEditedDoc();
+    const { opened } = await dm.openFromBackup(backupPath, dm.currentDoc!.docId);
+    expect(opened.stampedHtml).toContain('версия 1');
+    expect(dm.isDirty()).toBe(true);
+  });
 });
 
 describe('DocumentManager backup setting (injected backupWriter)', () => {

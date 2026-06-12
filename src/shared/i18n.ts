@@ -94,6 +94,12 @@ const STRINGS = {
     en: 'The file is not an image (PNG, JPEG, WebP, GIF, SVG, AVIF)',
   },
   'dialog.imagesFilter': { ru: 'Картинки', en: 'Images' },
+  // Rejected-op toast (quiet pill in the shell strip, auto-hides).
+  'notice.blockedBlock': {
+    ru: 'Это действие нельзя применить к уже изменённому блоку — сначала сохраните и переоткройте файл',
+    en: 'This action can’t apply to an already-edited block — save and reopen the file first',
+  },
+  'notice.opRejected': { ru: 'Действие отменено', en: 'Action couldn’t be applied' },
 
   // --- shell renderer (start screen + titlebar) -------------------------------
   'shell.tagline': {

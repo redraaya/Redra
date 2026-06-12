@@ -80,7 +80,11 @@ describe('guardDocPush (full ops:push gate)', () => {
 
   it('rejects a push carrying another document id (stale doc view invoke)', () => {
     const res = guardDocPush('doc-OLD', raw, 'doc-NEW', doc, []);
-    expect(res).toEqual({ ok: false, error: expect.stringContaining('doc-OLD') });
+    expect(res).toEqual({
+      ok: false,
+      error: expect.stringContaining('doc-OLD'),
+      code: 'stale-doc',
+    });
     expect(guardDocPush(42, raw, 'doc-NEW', doc, []).ok).toBe(false);
   });
 
@@ -94,6 +98,25 @@ describe('guardDocPush (full ops:push gate)', () => {
       false,
     );
     expect(guardDocPush('d1', raw, 'd1', doc, [deleteBlock('r3')]).ok).toBe(false);
+  });
+
+  it('labels every rejection with a code (main picks the user notice by it)', () => {
+    expect(guardDocPush('doc-OLD', raw, 'doc-NEW', doc, [])).toMatchObject({
+      ok: false,
+      code: 'stale-doc',
+    });
+    expect(guardDocPush('d1', { type: 'editText', id: 'r999', html: '' }, 'd1', doc, [])).toMatchObject(
+      { ok: false, code: 'invalid' },
+    );
+    expect(guardDocPush('d1', raw, 'd1', doc, [deleteBlock('r3')])).toMatchObject({
+      ok: false,
+      code: 'blocked-subtree',
+    });
+    expect(
+      guardDocPush('d1', { type: 'setAttr', id: 'r8', name: 'src', value: 'a.png' }, 'd1', doc, [
+        deleteBlock('r2'),
+      ]),
+    ).toMatchObject({ ok: false, code: 'blocked-subtree' });
   });
 
   it('gates setAttr the same way: shape, blocked subtree, docId', () => {

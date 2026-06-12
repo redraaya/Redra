@@ -38,11 +38,15 @@
  * Channels (doc preload → main, send):
  *   'edit:committed'    (nonce: string)            — ack for 'edit:commit'
  *   'doc:editorReady'   ()                         — editing layer booted (liveness beacon)
+ *   'ops:rejected-notice' (message: string)        — a rejected push was rolled back and
+ *                                                    deserves a user-visible notice; main
+ *                                                    forwards it to the shell as 'notice:show'
  *
  * Events (main → shell renderer):
  *   'doc:opened'        DocOpenedInfo
  *   'doc:dirtyChanged'  DirtyState   — pushed on every ops push/undo/redo/save
  *   'mode:changed'      ModeState    — «Просмотр» toggled
+ *   'notice:show'       NoticeInfo   — transient quiet toast (rejected-op notice)
  *   'update:available'  UpdateInfo   — once per launch, ~8s after ready, only
  *                                      when a newer non-dismissed release exists
  *
@@ -110,6 +114,12 @@ export interface ModeState {
   editing: boolean;
 }
 
+/** Payload of 'notice:show' — a transient quiet toast in the shell strip. */
+export interface NoticeInfo {
+  /** Already-localized text (main owns the locale). */
+  text: string;
+}
+
 /** Payload of 'update:available' — a newer release the user has not dismissed. */
 export interface UpdateInfo {
   /** Version without the leading «v», e.g. «0.2.0». */
@@ -118,7 +128,24 @@ export interface UpdateInfo {
   url: string;
 }
 
-export type OpPushResult = { ok: true } | { ok: false; error: string };
+/**
+ * Why an ops:push was rejected — set by the guard (see op-guard.ts):
+ *   'stale-doc'       — the push carried another document's id (in-flight
+ *                       invoke from a replaced document; dies silently);
+ *   'invalid'         — shape/id/value validation failed;
+ *   'blocked-subtree' — the target sits inside a subtree already consumed
+ *                       by an active editText/deleteBlock.
+ */
+export type OpRejectCode = 'stale-doc' | 'invalid' | 'blocked-subtree';
+
+/**
+ * userMessage is the LOCALIZED, user-facing explanation (main owns the
+ * locale); present only for rejections worth a notice — the preload shows
+ * it via 'ops:rejected-notice', never composing text of its own.
+ */
+export type OpPushResult =
+  | { ok: true }
+  | { ok: false; error: string; code?: OpRejectCode; userMessage?: string };
 
 export type OpUndoResult = { ok: boolean; dirty: boolean };
 
@@ -150,6 +177,8 @@ export interface RedraDocBridge {
   replaceImageFromPath(id: string, path: string): Promise<ImageValueResult>;
   /** Resolve a dropped File to its filesystem path (webUtils under the hood). */
   pathForFile(file: File): string;
+  /** A rejected push was rolled back — surface main's localized message as a shell toast. */
+  notifyRejected(message: string): void;
 }
 
 /** API exposed by the shell preload as window.redra. */
@@ -170,6 +199,7 @@ export interface RedraShellApi {
   onDocOpened(cb: (info: DocOpenedInfo) => void): void;
   onDirtyChanged(cb: (state: DirtyState) => void): void;
   onModeChanged(cb: (state: ModeState) => void): void;
+  onNotice(cb: (notice: NoticeInfo) => void): void;
   onUpdateAvailable(cb: (info: UpdateInfo) => void): void;
   /** Open the release page in the default browser (main validates the url). */
   openUpdate(url: string): void;

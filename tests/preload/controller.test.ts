@@ -23,6 +23,7 @@ function makeBridge() {
       value: 'data:image/png;base64,BB',
     })),
     pathForFile: vi.fn(() => '/tmp/dropped.png'),
+    notifyRejected: vi.fn(),
   } satisfies RedraDocBridge;
 }
 

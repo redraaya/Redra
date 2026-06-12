@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeT } from '../../src/shared/i18n.js';
-import { SelectionToolbar, selectionContext } from '../../src/preload/editor/toolbar.js';
+import { normalizeLinkInput, SelectionToolbar, selectionContext } from '../../src/preload/editor/toolbar.js';
 import { normalizeEditedHtml } from '../../src/engine/normalize.js';
 import type { ToolbarAction } from '../../src/preload/editor/toolbar.js';
 
@@ -105,6 +105,52 @@ describe('SelectionToolbar (DOM)', () => {
     input.value = '   ';
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it('Enter runs the typed value through normalizeLinkInput (example.com → https://)', () => {
+    const { toolbar, onAction } = makeToolbar();
+    toolbar.show(RECT, STATE);
+    toolbar.element.querySelectorAll('button')[3]!.click();
+    const input = toolbar.element.querySelector('input')!;
+    input.value = 'example.com/path';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(onAction).toHaveBeenCalledWith('link', 'https://example.com/path');
+  });
+});
+
+describe('normalizeLinkInput (schemeless host-like values get https://)', () => {
+  it('prepends https:// to host-like values', () => {
+    expect(normalizeLinkInput('example.com')).toBe('https://example.com');
+    expect(normalizeLinkInput('example.com/path?q=1#frag')).toBe('https://example.com/path?q=1#frag');
+    expect(normalizeLinkInput('www.example.com')).toBe('https://www.example.com');
+    expect(normalizeLinkInput('sub.domain.co.uk:8080/x')).toBe('https://sub.domain.co.uk:8080/x');
+    expect(normalizeLinkInput('  example.com  ')).toBe('https://example.com'); // trimmed
+  });
+
+  it('keeps explicit schemes untouched', () => {
+    expect(normalizeLinkInput('https://example.com')).toBe('https://example.com');
+    expect(normalizeLinkInput('http://example.com')).toBe('http://example.com');
+    expect(normalizeLinkInput('mailto:a@b.c')).toBe('mailto:a@b.c');
+    expect(normalizeLinkInput('tel:+1234')).toBe('tel:+1234');
+  });
+
+  it('keeps relative references relative', () => {
+    expect(normalizeLinkInput('глава-2')).toBe('глава-2'); // bare word, no dot
+    expect(normalizeLinkInput('#section')).toBe('#section');
+    expect(normalizeLinkInput('/abs/path')).toBe('/abs/path');
+    expect(normalizeLinkInput('./sibling')).toBe('./sibling');
+    expect(normalizeLinkInput('../up')).toBe('../up');
+    expect(normalizeLinkInput('//proto-relative.example')).toBe('//proto-relative.example');
+  });
+
+  it('keeps local html-file references relative despite the dot', () => {
+    expect(normalizeLinkInput('chapter-2.html')).toBe('chapter-2.html');
+    expect(normalizeLinkInput('notes.htm#top')).toBe('notes.htm#top');
+  });
+
+  it('leaves non-host-like dotted values alone (Cyrillic, spaces)', () => {
+    expect(normalizeLinkInput('глава-2.html')).toBe('глава-2.html');
+    expect(normalizeLinkInput('просто текст. с точкой')).toBe('просто текст. с точкой');
   });
 });
 

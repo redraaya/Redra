@@ -1,6 +1,7 @@
 import type { RecentEntry, RedraShellApi, Settings } from '../shared/ipc';
 import { makeT, pickLang } from '../shared/i18n';
 import { formatRelativeTime } from '../shared/relative-time';
+import { createNoticeToast } from './notice';
 import './style.css';
 
 declare global {
@@ -121,6 +122,11 @@ redra.onModeChanged((state) => {
   modePill.hidden = state.editing;
   btnPreview.classList.toggle('active', !state.editing);
 });
+
+// --- transient notice toast (rejected-op message from main) --------------------
+
+const notice = createNoticeToast(document);
+redra.onNotice((n) => notice.show(n.text));
 
 // --- update pill ----------------------------------------------------------------
 

@@ -18,6 +18,32 @@ import { closestTag } from './format.js';
 
 export type ToolbarAction = 'bold' | 'italic' | 'code' | 'link' | 'unlink';
 
+/**
+ * What the link input's Enter applies: people type «example.com/path» and
+ * expect a web link, but as an href it would resolve RELATIVE to the
+ * document and 404. A schemeless value whose first segment looks like a
+ * hostname (ASCII dot-separated labels, optional :port) gets https://
+ * prepended. Everything else stays as typed:
+ * - explicit schemes (https:, mailto:, tel:, …);
+ * - relative references — «глава-2», #anchor, /abs, ./x, ../y, //host;
+ * - local document references: a host-like value ending in .htm/.html
+ *   («chapter-2.html») is far more likely a sibling file than a bare TLD;
+ * - anything non-ASCII or spaced («глава-2.html») — not a hostname.
+ */
+export function normalizeLinkInput(raw: string): string {
+  const value = raw.trim();
+  if (value === '') return value;
+  // «host:8080/x» is colon-ambiguous: a digits-only «scheme» followed by a
+  // path boundary is a PORT, not a scheme — fall through to the host check.
+  const looksLikePort = /^[a-z0-9.-]+:\d+([/?#]|$)/i.test(value);
+  if (!looksLikePort && /^[a-z][a-z0-9+.-]*:/i.test(value)) return value; // explicit scheme
+  if (/^[/#.]/.test(value)) return value; // absolute / anchor / dot-relative (and //host)
+  const host = value.split(/[/?#]/, 1)[0]!;
+  if (/\.html?$/i.test(host)) return value; // sibling document, not a TLD
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?$/i.test(host)) return value;
+  return `https://${value}`;
+}
+
 export interface ToolbarState {
   bold: boolean;
   italic: boolean;
@@ -160,7 +186,7 @@ export class SelectionToolbar {
       if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
-        const href = this.linkInput.value.trim();
+        const href = normalizeLinkInput(this.linkInput.value);
         this.exitLinkMode();
         if (href) this.onAction('link', href);
       } else if (e.key === 'Escape') {

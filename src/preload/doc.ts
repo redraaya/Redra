@@ -37,6 +37,9 @@ const bridge: RedraDocBridge = {
   replaceImageFromPath: (id, path) =>
     ipcRenderer.invoke('image:fromPath', docId, id, path) as Promise<ImageValueResult>,
   pathForFile: (file) => webUtils.getPathForFile(file),
+  notifyRejected: (message) => {
+    ipcRenderer.send('ops:rejected-notice', message);
+  },
 };
 
 let controller: EditorController | null = null;

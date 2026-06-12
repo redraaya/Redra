@@ -39,6 +39,28 @@ describe('BackupStore.backupFor (timestamped)', () => {
     expect(await readFile(b, 'utf8')).toBe('SECOND');
   });
 
+  it('same-second writes get a -2/-3 uniquifier instead of overwriting each other', async () => {
+    const src = path.join(dir, 'doc.html');
+    const a = await store.backupFor(src, Buffer.from('FIRST'), T0);
+    const b = await store.backupFor(src, Buffer.from('SECOND'), T0);
+    const c = await store.backupFor(src, Buffer.from('THIRD'), T0);
+
+    expect(path.basename(b)).toBe(path.basename(a).replace('.orig.html', '-2.orig.html'));
+    expect(path.basename(c)).toBe(path.basename(a).replace('.orig.html', '-3.orig.html'));
+    expect(await readFile(a, 'utf8')).toBe('FIRST');
+    expect(await readFile(b, 'utf8')).toBe('SECOND');
+    expect(await readFile(c, 'utf8')).toBe('THIRD');
+
+    // All three are versions of the SAME document, same savedAt second.
+    const entries = await store.list(src);
+    expect(entries.map((e) => e.path).sort()).toEqual([a, b, c].sort());
+    expect(entries.every((e) => e.savedAt === T0)).toBe(true);
+
+    // And prune treats them as ordinary versions of one document.
+    await store.prune(1, 100);
+    expect(await readdir(path.join(dir, 'backups'))).toHaveLength(1);
+  });
+
   it('hashes the FULL path: same basename in different folders never collides', async () => {
     const a = await store.backupFor(path.join(dir, 'a', 'doc.html'), Buffer.from('A'), T0);
     const b = await store.backupFor(path.join(dir, 'b', 'doc.html'), Buffer.from('B'), T0);

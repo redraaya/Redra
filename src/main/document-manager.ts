@@ -160,10 +160,19 @@ export class DocumentManager {
    *  3. re-stat the file so the later save does not false-conflict;
    *  4. swap in the parsed document with restoredFromBackup set (dirty until
    *     saved; ops-free save WRITES instead of skipping).
+   *
+   * `expectedDocId` guards against a stale restore: the menu flow awaits
+   * several dialogs, and the user may open a DIFFERENT document meanwhile —
+   * applying document A's backup to document B would corrupt B. The caller
+   * passes the docId it captured BEFORE any dialog; a mismatch aborts before
+   * anything (snapshot included) happens.
    */
-  async openFromBackup(backupPath: string): Promise<{ opened: OpenedDoc }> {
+  async openFromBackup(backupPath: string, expectedDocId?: string): Promise<{ opened: OpenedDoc }> {
     const cur = this.current;
     if (!cur) throw new Error('Документ не открыт');
+    if (expectedDocId !== undefined && cur.docId !== expectedDocId) {
+      throw new Error('restore aborted: the open document changed');
+    }
     const filePath = cur.filePath;
 
     const originalBytes = await fs.readFile(backupPath);

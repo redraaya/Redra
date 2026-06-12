@@ -26,7 +26,11 @@ export interface BackupEntry {
 }
 
 const SUFFIX = '.orig.html';
-/** `YYYYMMDD-HHmmss` (local time), parsed back by stampToMs. */
+/**
+ * `YYYYMMDD-HHmmss` (local time), parsed back by stampToMs. A same-second
+ * collision uniquifier (`-2`, `-3`, …) may follow the stamp in file names;
+ * stampToMs ignores it — both files report the same savedAt second.
+ */
 function formatStamp(at: number): string {
   const d = new Date(at);
   const p = (n: number, w = 2): string => String(n).padStart(w, '0');
@@ -37,7 +41,7 @@ function formatStamp(at: number): string {
 }
 
 function stampToMs(stamp: string): number | null {
-  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(stamp);
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(?:-\d+)?$/.exec(stamp);
   if (!m) return null;
   const [, y, mo, d, h, mi, s] = m;
   const ms = new Date(
@@ -78,14 +82,19 @@ export class BackupStore {
   /**
    * Write the pre-edit bytes of `filePath` into the store (atomic), return
    * the backup path. Each session's first overwrite-save adds a NEW
-   * timestamped entry; two writes within the same second coalesce into one
-   * file (same name — the later write wins, which is fine: same second,
-   * same session). Per-session "only the first save backs up" gating is the
-   * caller's job (DocumentManager's backupDone flag).
+   * timestamped entry; two writes within the same second do NOT overwrite
+   * each other — the second gets a `-2` (`-3`, …) uniquifier before the
+   * suffix, so e.g. a restore's safety snapshot never clobbers the version
+   * written moments earlier. Per-session "only the first save backs up"
+   * gating is the caller's job (DocumentManager's backupDone flag).
    */
   async backupFor(filePath: string, bytes: Buffer, at: number | Date): Promise<string> {
     await fs.mkdir(this.dir, { recursive: true });
-    const target = this.backupPathFor(filePath, at);
+    const base = this.backupPathFor(filePath, at);
+    let target = base;
+    for (let n = 2; await fileExists(target); n++) {
+      target = `${base.slice(0, -SUFFIX.length)}-${n}${SUFFIX}`;
+    }
     await writeAtomic(target, bytes);
     return target;
   }
@@ -166,11 +175,19 @@ function parseKeyed(name: string, key: string): number | null | undefined {
   return ms === null ? undefined : ms;
 }
 
+/** True when `p` exists (any kind of dirent). */
+function fileExists(p: string): Promise<boolean> {
+  return fs.access(p).then(
+    () => true,
+    () => false,
+  );
+}
+
 /** Parse any store entry into its per-document key + optional name timestamp. */
 function parseAny(name: string): { key: string; savedAt: number | null } | null {
   if (!name.endsWith(SUFFIX)) return null;
-  const stem = name.slice(0, -SUFFIX.length); // `<base>.<hash8>[.<stamp>]`
-  const m = /^(.+)\.(\d{8}-\d{6})$/.exec(stem);
+  const stem = name.slice(0, -SUFFIX.length); // `<base>.<hash8>[.<stamp>[-N]]`
+  const m = /^(.+)\.(\d{8}-\d{6}(?:-\d+)?)$/.exec(stem);
   if (m) {
     const ms = stampToMs(m[2]!);
     if (ms !== null) return { key: m[1]!, savedAt: ms };

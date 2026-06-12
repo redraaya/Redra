@@ -50,6 +50,21 @@ describe('edit session commit pipeline', () => {
     expect(p.hasAttribute('contenteditable')).toBe(false);
   });
 
+  it('commit stubs heavy attr values on stamped elements in the WIRE payload only', () => {
+    const big = 'data:image/png;base64,' + 'A'.repeat(3 * 1024 * 1024); // ~3 MB — over the 2 MB editText cap
+    const p = mountP(`до <img data-redra-id="r8" src="${big}" alt="img"> после`);
+    const s = beginSession(p, normalizeEditedHtml)!;
+    p.innerHTML = `ПРАВКА <img data-redra-id="r8" src="${big}" alt="img"> после`;
+    const result = commitSession(s, normalizeEditedHtml)!;
+
+    // The op ships without the multi-MB data URI (provenance restores the
+    // real attributes from the ops-applied source at save time)…
+    expect(result.op.html).toBe('ПРАВКА <img data-redra-id="r8" src="" alt="img"> после');
+    // …while the live DOM and the local inverse stack keep the real value.
+    expect(p.innerHTML).toContain(big);
+    expect(result.newHtml).toContain(big);
+  });
+
   it('Escape revert restores the EXACT pre-session innerHTML', () => {
     const original = 'привет <b data-redra-id="r6">мир</b> <!--c--> хвост';
     const p = mountP(original);

@@ -276,3 +276,54 @@ export function normalizeEditedHtml(raw: string): string {
   for (const child of fragment.childNodes) child.parentNode = fragment;
   return serialize(fragment);
 }
+
+/**
+ * Attribute values STRICTLY longer than this are stubbed out of editText
+ * wire payloads by stubHeavyStampedAttrs. 4 KB comfortably covers any
+ * legitimate hand-written attribute while catching embedded data: URIs.
+ */
+export const HEAVY_STAMPED_ATTR_LIMIT = 4096;
+
+/**
+ * Slim an editText payload before it goes over the wire: on STAMPED
+ * elements, replace every attribute value longer than
+ * HEAVY_STAMPED_ATTR_LIMIT with an empty string.
+ *
+ * Why this is safe: a stamped element's live attributes are dead weight in
+ * the payload anyway — the provenance gate (enforceStampProvenance in
+ * ops.ts) replaces a VERIFIED stamped element's attributes wholesale with
+ * the ones from the ops-applied source, so a replaced image's real data:
+ * URI reaches the saved file via the journal's setAttr op, not via this
+ * payload. Without the stub, a multi-MB data: URI inside an edited block
+ * would blow the editText size cap and bounce the user's TEXT edit.
+ *
+ * Untouched on purpose:
+ * - the live DOM (callers operate on the serialized payload only);
+ * - UNSTAMPED elements — the gate never restores their attributes, so
+ *   stubbing would lose real content (normalizeEditedHtml already strips
+ *   their attributes anyway, safe href on <a> excepted);
+ * - stamped <template> content — the gate requires it to be byte-identical
+ *   to the source, so rewriting anything inside would delete the template.
+ *
+ * Pure parse5, idempotent, engine-adjacent to normalizeEditedHtml (run it
+ * on that function's output).
+ */
+export function stubHeavyStampedAttrs(html: string): string {
+  const fragment = parseFragment(html);
+  stubSiblings(fragment.childNodes);
+  return serialize(fragment);
+}
+
+function stubSiblings(nodes: readonly ChildNode[]): void {
+  for (const node of nodes) {
+    if (!isElementNode(node)) continue;
+    if (isStamped(node)) {
+      for (const attr of node.attrs) {
+        if (attr.value.length > HEAVY_STAMPED_ATTR_LIMIT) attr.value = '';
+      }
+    }
+    // template children live in node.content, which is deliberately NOT
+    // walked (verbatim byte-check, see above) — childNodes covers the rest.
+    stubSiblings(node.childNodes);
+  }
+}
