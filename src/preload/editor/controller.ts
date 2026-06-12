@@ -406,11 +406,26 @@ export function createEditorController(
     if (editable) startSession(editable, e.clientX, e.clientY);
   }
 
+  /** Last known pointer position — lets scroll/resize re-evaluate hover for
+   *  whatever ends up under a STATIONARY cursor (mouseover only fires on
+   *  boundary crossings, so scrolled-under content never triggers it). */
+  let lastPointer: { x: number; y: number } | null = null;
+
+  function onMouseMove(e: MouseEvent): void {
+    lastPointer = { x: e.clientX, y: e.clientY };
+  }
+
   function onMouseOver(e: MouseEvent): void {
+    lastPointer = { x: e.clientX, y: e.clientY };
     if (session || dragging) return; // block UI is dormant during a session/drag
     const target = asElement(e.target);
     if (!target) return;
     if (overlay.containsTarget(target)) return; // hovering the pill/chip keeps it alive
+    applyHoverTarget(target, e.clientX, e.clientY);
+  }
+
+  /** Shared hover evaluation for mouseover AND scroll-refresh paths. */
+  function applyHoverTarget(target: Element, x: number, y: number): void {
     // Replace affordance for original images: chip at the img's top-right.
     // The chip overlaps the img rect, so there is no dead gap to cross.
     const img = asReplaceableImage(target);
@@ -427,7 +442,7 @@ export function createEditorController(
       hoverBlock &&
       block !== hoverBlock &&
       block.contains(hoverBlock) &&
-      withinHandleReach(e)
+      withinHandleReach(x, y)
     ) {
       return;
     }
@@ -444,19 +459,30 @@ export function createEditorController(
     // no block resolves, and without this guard the pill vanishes before it
     // can be clicked. Keep the current block while the pointer stays inside
     // its rect extended to cover the pill (plus diagonal slack).
-    if (!block && hoverBlock && withinHandleReach(e)) return;
+    if (!block && hoverBlock && withinHandleReach(x, y)) return;
     setHover(block);
   }
 
-  function withinHandleReach(e: MouseEvent): boolean {
+  /** Re-run hover for the element under the stationary pointer (scroll/resize). */
+  function refreshHoverUnderPointer(): void {
+    if (session || dragging || !lastPointer) return;
+    const fromPoint = (doc as { elementFromPoint?: (x: number, y: number) => Element | null })
+      .elementFromPoint;
+    if (typeof fromPoint !== 'function') return;
+    const el = fromPoint.call(doc, lastPointer.x, lastPointer.y);
+    if (!el || overlay.containsTarget(el)) return;
+    applyHoverTarget(el, lastPointer.x, lastPointer.y);
+  }
+
+  function withinHandleReach(x: number, y: number): boolean {
     if (!hoverBlock) return false;
     const r = hoverBlock.getBoundingClientRect();
     const slack = 8;
     return (
-      e.clientX >= r.left - HANDLE_REACH - slack &&
-      e.clientX <= r.right + slack &&
-      e.clientY >= r.top - slack &&
-      e.clientY <= r.bottom + slack
+      x >= r.left - HANDLE_REACH - slack &&
+      x <= r.right + slack &&
+      y >= r.top - slack &&
+      y <= r.bottom + slack
     );
   }
 
@@ -487,11 +513,16 @@ export function createEditorController(
       repositionQueued = false;
       overlay.reposition();
       updateToolbar(); // the selection rect moved with the scroll
+      // Content may have scrolled under a stationary pointer — mouseover
+      // never fires for that, so the chip/handle would go stale (field bug:
+      // large images only got the chip when entered from the side).
+      refreshHoverUnderPointer();
     });
   }
 
   const listeners: Array<[string, EventListener, boolean | AddEventListenerOptions]> = [
     ['click', onClick as EventListener, true],
+    ['mousemove', onMouseMove as EventListener, { capture: true, passive: true }],
     ['mouseover', onMouseOver as EventListener, true],
     ['mouseout', onMouseOut as EventListener, true],
     ['keydown', onKeyDown as EventListener, true],

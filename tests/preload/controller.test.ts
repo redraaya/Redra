@@ -378,3 +378,53 @@ describe('tall legit blocks are NOT page wrappers', () => {
     expect(t.classList.contains('redra-hover')).toBe(true);
   });
 });
+
+describe('hover refresh on scroll (large images / scrolled content)', () => {
+  let bridge: ReturnType<typeof makeBridge>;
+  let controller: EditorController;
+
+  beforeEach(() => {
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 0)) as unknown as typeof window.requestAnimationFrame;
+    document.body.innerHTML =
+      '<p data-redra-id="rA" id="a">текст</p><p data-redra-id="rB" id="b">ниже</p>';
+    bridge = makeBridge();
+    controller = createEditorController(window, bridge, normalizeEditedHtml);
+    controller.setEditing(true);
+  });
+
+  afterEach(() => {
+    controller.destroy();
+    document.body.innerHTML = '';
+    delete (document as { elementFromPoint?: unknown }).elementFromPoint;
+  });
+
+  it('acquires hover for the element scrolled under a stationary pointer', async () => {
+    const b = document.getElementById('b')!;
+    // The pointer sits still at (50, 60): record it via a mousemove…
+    window.dispatchEvent(
+      new MouseEvent('mousemove', { bubbles: true, clientX: 50, clientY: 60 }),
+    );
+    // …content scrolls underneath; no mouseover boundary is ever crossed,
+    // but elementFromPoint now reports <p id=b> under the cursor.
+    (document as { elementFromPoint?: (x: number, y: number) => Element | null }).elementFromPoint =
+      () => b;
+    window.dispatchEvent(new Event('scroll'));
+    await new Promise((r) => setTimeout(r, 0)); // flush the rAF stub
+    expect(b.classList.contains('redra-hover')).toBe(true);
+  });
+
+  it('drops a stale hover when scrolling moves the block away from the pointer', async () => {
+    const a = document.getElementById('a')!;
+    a.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 10, clientY: 10 }));
+    expect(a.classList.contains('redra-hover')).toBe(true);
+    window.dispatchEvent(
+      new MouseEvent('mousemove', { bubbles: true, clientX: 400, clientY: 400 }),
+    );
+    (document as { elementFromPoint?: (x: number, y: number) => Element | null }).elementFromPoint =
+      () => document.body;
+    window.dispatchEvent(new Event('scroll'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(a.classList.contains('redra-hover')).toBe(false);
+  });
+});
