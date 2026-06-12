@@ -1,157 +1,157 @@
-# Redra — десктопный визуальный редактор HTML-файлов
+# Redra — a desktop visual editor for HTML files
 
-## Контекст
+## Context
 
-ИИ-инструменты массово генерируют результаты в виде HTML-файлов — отчёты, аналитика, презентации. Отредактировать такой файл сегодня можно только через код. Исследование рынка (июнь 2026) показало, что ниша пуста: единственный живой аналог Pinegrow — платный про-инструмент для веб-разработчиков; BlueGriffon/KompoZer/Amaya мертвы; Word/LibreOffice уничтожают вёрстку при сохранении; BlockNote/Tiptap/GrapesJS — библиотеки, а не приложения.
+AI tools generate results as HTML files at scale — reports, analytics, presentations. Today the only way to edit such a file is through code. Market research (June 2026) showed the niche is empty: the only living analog, Pinegrow, is a paid pro tool for web developers; BlueGriffon/KompoZer/Amaya are dead; Word/LibreOffice destroy the markup on save; BlockNote/Tiptap/GrapesJS are libraries, not applications.
 
-**Строим своё.** Сценарий: открыл HTML → видишь ровно как в Chrome → **сразу тыкнул в текст и пишешь** → перетащил/удалил блок → сохранил тот же файл (вёрстка не пострадала) → экспортировал в PDF при желании. Эстетика — по образцу [MarkMello](https://github.com/dartdavros/MarkMello): минимум интерфейса вокруг контента.
+**We build our own.** The scenario: open an HTML file → see it exactly as in Chrome → **click into the text and just write** → drag/delete a block → save the same file (layout intact) → export to PDF if you want. Aesthetics modeled on [MarkMello](https://github.com/dartdavros/MarkMello): minimal interface around the content.
 
-**Два главных приоритета продукта: дизайн и быстродействие.** Цели: холодный старт < 1.5 с, открытие файла — на скорости Chrome, отклик на клик/ввод < 16 мс (без подлагиваний), сохранение < 100 мс. Оболочка — без тяжёлых фреймворков (ванильный TS + CSS).
+**The two top product priorities: design and speed.** Targets: cold start < 1.5 s, file open at Chrome speed, click/typing response < 16 ms (no jank), save < 100 ms. The shell uses no heavy frameworks (vanilla TS + CSS).
 
-Название: **Redra** (утверждено пользователем).
+Name: **Redra** (approved by the user).
 
-## Решения, принятые с пользователем
+## Decisions made with the user
 
-- **Без переключения режимов**: открыл — и сразу можно редактировать («тыц и пиши»). Режим «Просмотр» (полная интерактивность страницы, как в Chrome) — опциональный тумблер для особых случаев, не дефолт.
-- **Экспорт v1**: сохранение HTML (тот же файл / Save As) + экспорт в PDF.
-- **Дистрибуция**: open source на GitHub, релизы через GitHub Actions. **Сначала только macOS Apple Silicon (arm64)** — для скорости выхода. Windows и Intel-Mac — следом (архитектура кроссплатформенная с первого дня, это только цели сборки).
-- **Семантика сохранения**: визуальная целостность. Удалил блоки в начале — остальное «подтянулось»; добавил текст на 3-й слайд — соседние слайды не пострадали. Достигается тем, что мы **никогда не трогаем CSS и структуру — только редактируемый контент**.
-- **Пользователь контролирует визуал**: каждый этап, затрагивающий внешний вид (оболочка, иконка, стартовый экран, ручки блоков), начинается с макетов на утверждение. Без утверждения дизайн не кодим.
+- **No mode switching**: open the file — and you can edit right away ("click and write"). The "Preview" mode (full page interactivity, as in Chrome) is an optional toggle for special cases, not the default.
+- **Export v1**: save HTML (same file / Save As) + export to PDF.
+- **Distribution**: open source on GitHub, releases via GitHub Actions. **macOS Apple Silicon (arm64) only at first** — for speed of shipping. Windows and Intel Mac follow (the architecture is cross-platform from day one; these are just build targets).
+- **Save semantics**: visual integrity. Deleted blocks at the top — the rest "pulls up"; added text on slide 3 — neighboring slides are unharmed. Achieved by **never touching CSS or structure — only the editable content**.
+- **The user controls the visuals**: every stage that affects appearance (shell, icon, start screen, block handles) starts with mockups for approval. No design gets coded without approval.
 
-## Технология: Electron (а не Avalonia, как у MarkMello)
+## Technology: Electron (not Avalonia, as in MarkMello)
 
-MarkMello написан на C#/Avalonia и рисует Markdown нативными контролами — для Markdown это работает, формат примитивный. Произвольный HTML+CSS+JS «ровно как в Chrome» Avalonia отрисовать не может — пришлось бы встраивать Chromium внутрь, и логика редактирования всё равно жила бы в JS. Поэтому Electron: настоящий Chromium внутри, рендеринг 1:1 с Chrome. Цена — ~150–200 МБ на диске (как Notion/Slack); на быстродействие в работе это не влияет, бюджеты скорости выше — обязательные.
+MarkMello is written in C#/Avalonia and renders Markdown with native controls — that works for Markdown, the format is primitive. Avalonia cannot render arbitrary HTML+CSS+JS "exactly as in Chrome" — we would have to embed Chromium anyway, and the editing logic would still live in JS. Hence Electron: real Chromium inside, 1:1 rendering with Chrome. The cost is ~150–200 MB on disk (like Notion/Slack); it does not affect working speed — the speed budgets above are mandatory.
 
-Стек: **Electron + TypeScript + electron-vite, parse5 (парсинг исходника), electron-builder + GitHub Actions, vitest (тесты движка)**.
+Stack: **Electron + TypeScript + electron-vite, parse5 (source parsing), electron-builder + GitHub Actions, vitest (engine tests)**.
 
-## Архитектура: «правки поверх нетронутого исходника»
+## Architecture: "edits over a pristine source"
 
-Ключевой корнеркейс: файлы содержат собственные скрипты (графики, интерактив), меняющие DOM на лету. Сериализовать живой DOM нельзя — в файл попадёт мусор. Поэтому:
+The key corner case: files contain their own scripts (charts, interactivity) that mutate the DOM on the fly. Serializing the live DOM is not an option — garbage would end up in the file. Therefore:
 
-1. **Загрузка.** Файл парсится parse5 без выполнения скриптов → «эталонное дерево». Каждый элемент получает стабильный id (`data-redra-id`), размеченная копия отдаётся в окно через собственный протокол `redra://` (он же отдаёт картинки и ресурсы по относительным путям из папки файла).
-2. **Отображение.** Страница живёт как в Chrome: скрипты работают, графики рисуются. Элементы, созданные скриптами на лету, не имеют id → нередактируемы (корректно: их нет в исходнике).
-3. **Редактирование = журнал операций**: `editText(id, контент)`, `deleteBlock(id)`, `moveBlock(id, позиция)`. Журнал даёт undo/redo бесплатно.
-4. **Сохранение.** Операции применяются к эталонному дереву (без разметки), результат сериализуется и атомарно пишется. Всё нетронутое — стили, скрипты, атрибуты, комментарии — переносится как есть.
+1. **Load.** The file is parsed with parse5 without executing scripts → the "reference tree". Every element gets a stable id (`data-redra-id`); the stamped copy is served to the window via our own `redra://` protocol (which also serves images and resources by relative paths from the file's folder).
+2. **Display.** The page lives as in Chrome: scripts run, charts draw. Elements created by scripts on the fly have no id → not editable (correctly so: they are not in the source).
+3. **Editing = a journal of operations**: `editText(id, content)`, `deleteBlock(id)`, `moveBlock(id, position)`. The journal gives undo/redo for free.
+4. **Save.** The operations are applied to the reference tree (without the stamping); the result is serialized and written atomically. Everything untouched — styles, scripts, attributes, comments — is carried over as is.
 
-Движок (`парсинг → дерево → операции → сериализация`) — чистый TypeScript без Electron-зависимостей, полностью под юнит-тестами.
+The engine (`parse → tree → operations → serialize`) is pure TypeScript with no Electron dependencies, fully covered by unit tests.
 
-### Взаимодействие (живое редактирование по умолчанию)
+### Interaction (live editing by default)
 
-Слой редактора инжектируется через preload в изолированном мире — CSP и скрипты файла ему не мешают, он не мусорит в страницу.
+The editor layer is injected via preload into an isolated world — the file's CSP and scripts cannot interfere with it, and it leaves no litter in the page.
 
-- **Клик в текст → каретка сразу**, пишешь. Ближайший текстовый элемент точечно становится contenteditable; фиксация операции по blur/Esc. Стили наследуются от страницы автоматически.
-- **Ссылки**: клик = редактирование текста ссылки; **Cmd+клик** = открыть в браузере (подсказка при наведении).
-- **Интерактив страницы** (кнопки, обработчики): в живом редактировании подавлен, чтобы клики не вызывали побочных эффектов. Тумблер «Просмотр» возвращает полную интерактивность как в Chrome.
-- **Блоки**: при наведении — контур + ручка ⋮⋮ (как в Notion) + удаление. Перетаскивание меняет порядок среди соседей по родителю (v1). Удалённый блок — документ «подтягивается» собственным CSS страницы.
+- **Click into text → caret immediately**, and you write. The nearest text element becomes precisely contenteditable; the operation is committed on blur/Esc. Styles are inherited from the page automatically.
+- **Links**: click = edit the link text; **Cmd+click** = open in the browser (hint on hover).
+- **Page interactivity** (buttons, handlers): suppressed in live editing so clicks have no side effects. The "Preview" toggle brings back full Chrome-like interactivity.
+- **Blocks**: on hover — outline + a ⋮⋮ handle (as in Notion) + delete. Dragging reorders among siblings within the parent (v1). After a delete the document "pulls up" via the page's own CSS.
 - **Undo/redo**: Cmd+Z / Cmd+Shift+Z.
-- Горячие клавиши: Cmd+O, Cmd+S, Cmd+Shift+S (Save As), Cmd+E (тумблер «Просмотр»).
+- Hotkeys: Cmd+O, Cmd+S, Cmd+Shift+S (Save As), Cmd+E ("Preview" toggle).
 
-### Оболочка
+### Shell
 
-Стартовый экран (drag-and-drop + недавние файлы), тонкий тулбар (открыть, просмотр-тумблер, сохранить, PDF), светлая/тёмная тема оболочки (контент окрашивает сам файл), индикатор несохранённых изменений, предупреждение при закрытии. Дизайн — только по утверждённым макетам.
+Start screen (drag-and-drop + recent files), a thin toolbar (open, preview toggle, save, PDF), light/dark shell theme (the content is colored by the file itself), unsaved-changes indicator, warning on close. Design — only from approved mockups.
 
-### Сохранение и экспорт
+### Saving and export
 
-Атомарная запись (tmp + rename); резервная копия `имя.html.bak` при первом сохранении (настройка, по умолчанию вкл); проверка mtime при внешних изменениях; PDF через `webContents.printToPDF`.
+Atomic write (tmp + rename); a backup copy `name.html.bak` on first save (a setting, on by default); mtime check for external changes; PDF via `webContents.printToPDF`.
 
-## Корнеркейсы
+## Corner cases
 
-| Кейс | Решение |
+| Case | Solution |
 |---|---|
-| Скрипты страницы перерисовывают DOM | Сохраняем эталонное дерево + операции, живой DOM не сериализуем |
-| Файл целиком рендерится скриптом (React-подобный) | Почти нечего редактировать — уведомление «контент создаётся скриптом» |
-| CSP в файле блокирует инжекцию | Preload + изолированный мир + insertCSS обходят CSP |
-| Клик по ссылке/кнопке вызывает побочные эффекты | Живое редактирование подавляет обработчики страницы; Cmd+клик и режим «Просмотр» — для интерактива |
-| Презентация с фиксированными слайдами | CSS не трогаем → правка текста не меняет соседние слайды |
-| Относительные пути к ресурсам | Протокол `redra://` отдаёт их из папки файла |
-| contenteditable порождает грязный HTML | Нормализация при фиксации (белый список inline-тегов) |
-| Кодировки, entities, `<pre>`-пробелы | parse5 — тот же алгоритм парсинга, что в браузерах |
-| Файл изменён извне во время работы | Проверка mtime + предупреждение |
+| Page scripts redraw the DOM | We save the reference tree + operations; the live DOM is never serialized |
+| The file is rendered entirely by a script (React-like) | Almost nothing to edit — a "content is generated by a script" notice |
+| CSP in the file blocks injection | Preload + isolated world + insertCSS bypass CSP |
+| Clicking a link/button triggers side effects | Live editing suppresses page handlers; Cmd+click and "Preview" mode are there for interactivity |
+| Presentation with fixed slides | We never touch CSS → editing text does not affect neighboring slides |
+| Relative resource paths | The `redra://` protocol serves them from the file's folder |
+| contenteditable produces dirty HTML | Normalization on commit (whitelist of inline tags) |
+| Encodings, entities, `<pre>` whitespace | parse5 — the same parsing algorithm as in browsers |
+| File changed externally while working | mtime check + warning |
 
-## Задел на будущее — без переписываний
+## Future-proofing — no rewrites
 
-Архитектура журнала операций расширяется добавлением типов операций, ничего не переделывая:
+The operation-journal architecture extends by adding operation types, redoing nothing:
 
-- перенос блока в другой контейнер → `moveBlock(id, newParentId, index)` — то же ядро;
-- дублирование блока → `cloneBlock(id)`;
-- замена картинок → `setAttr(id, 'src', …)` + копирование файла рядом;
-- инлайн-форматирование (жирный/курсив/ссылка) → тулбар над выделением, фиксируется тем же `editText`;
-- поиск по документу → чисто UI, движок не трогаем;
-- экспорт в Markdown → сериализация эталонного дерева через turndown;
-- Windows/Intel-Mac → цели сборки electron-builder, код общий;
-- подпись/нотаризация/автообновления → конфигурация сборки + аккаунт Apple, без изменений кода.
+- moving a block to another container → `moveBlock(id, newParentId, index)` — same core;
+- duplicating a block → `cloneBlock(id)`;
+- replacing images → `setAttr(id, 'src', …)` + copying the file alongside;
+- inline formatting (bold/italic/link) → a toolbar over the selection, committed via the same `editText`;
+- in-document search → pure UI, the engine is untouched;
+- Markdown export → serializing the reference tree through turndown;
+- Windows/Intel Mac → electron-builder build targets, shared code;
+- signing/notarization/auto-updates → build configuration + an Apple account, no code changes.
 
-В v1 сознательно не входят, но ничем не заблокированы.
+Deliberately out of v1, but blocked by nothing.
 
-## Процесс разработки: мультиагентный, с перекрёстной проверкой
+## Development process: multi-agent, with cross-review
 
-Каждый этап: **агент-исполнитель** работает по спеке этапа → **агент-ревьюер** (superpowers:code-reviewer) проверяет результат против плана и стандартов → тесты должны проходить → только потом следующий этап. Контекст не теряется: дизайн-док и план реализации лежат в репозитории (`docs/plans/`), коммиты по этапам; каждый агент получает спеку этапа + дизайн-док, а не пересказ из памяти. Этапы с UI дополнительно проходят визуальную проверку скриншотами и утверждение пользователем.
+Each stage: an **implementer agent** works from the stage spec → a **reviewer agent** (superpowers:code-reviewer) checks the result against the plan and standards → tests must pass → only then the next stage. Context is never lost: the design doc and the implementation plan live in the repository (`docs/plans/`), commits per stage; every agent receives the stage spec + the design doc, not a retelling from memory. UI stages additionally go through visual verification with screenshots and user approval.
 
-## Этапы
+## Stages
 
-**Этап 0 — дизайн-концепция (с пользователем).** Макеты оболочки (стартовый экран, окно документа, ручки блоков, тулбар) как HTML-прототипы + 2–3 концепта иконки. Итерации до утверждения. Здесь же финализируем имя приложения.
+**Stage 0 — design concept (with the user).** Shell mockups (start screen, document window, block handles, toolbar) as HTML prototypes + 2–3 icon concepts. Iterate until approved. The application name is finalized here too.
 
-**Этап 1 — движок (чистый TS + vitest).** Парсинг parse5, разметка id, журнал операций, применение к эталонному дереву, сериализация, undo/redo. Тесты: round-trip без правок; каждая операция; смешанные сценарии; `<pre>`, комментарии, инлайн-скрипты.
+**Stage 1 — engine (pure TS + vitest).** parse5 parsing, id stamping, operation journal, applying to the reference tree, serialization, undo/redo. Tests: round-trip with no edits; every operation; mixed scenarios; `<pre>`, comments, inline scripts.
 
-**Этап 2 — каркас Electron.** Окно, протокол `redra://`, открытие файла (диалог + drag-and-drop + ассоциация .html), загрузка размеченной копии, перехват навигации, сохранение/Save As, недавние файлы. Замер бюджетов скорости.
+**Stage 2 — Electron skeleton.** Window, `redra://` protocol, file open (dialog + drag-and-drop + .html association), loading the stamped copy, navigation interception, save/Save As, recent files. Speed-budget measurements.
 
-**Этап 3 — слой живого редактирования.** Preload-инжекция, клик-в-текст, нормализация contenteditable, подсветка и ручки блоков (по утверждённому дизайну), удаление, drag-reorder, undo/redo, тумблер «Просмотр», мост операций.
+**Stage 3 — live editing layer.** Preload injection, click-into-text, contenteditable normalization, block highlight and handles (per the approved design), delete, drag-reorder, undo/redo, "Preview" toggle, operation bridge.
 
-**Этап 4 — оболочка и полировка.** Стартовый экран и тулбар по макетам этапа 0, темы, индикатор изменений, .bak, mtime, экспорт PDF, иконка.
+**Stage 4 — shell and polish.** Start screen and toolbar from the Stage 0 mockups, themes, change indicator, .bak, mtime, PDF export, icon.
 
-**Этап 5 — дистрибуция.** electron-builder: DMG arm64; GitHub Actions релиз по тегу; README со скриншотами; лицензия (MIT или GPL-3.0 — решить при публикации).
+**Stage 5 — distribution.** electron-builder: arm64 DMG; GitHub Actions release on tag; README with screenshots; license (MIT or GPL-3.0 — decide at publication).
 
-## Доступы и подготовка от пользователя
+## Access and preparation from the user
 
-1. **GitHub** (решено: делаем в начале работ): я ставлю GitHub CLI (`brew install gh`), пользователь один раз логинится через `gh auth login` (браузер, пара кликов). Дальше репозиторий, пуши и релизы делаю я. Node.js v25 и npm уже стоят — больше для разработки ничего не нужно.
-2. **Не нужно сейчас**: аккаунт Apple Developer ($99/год) понадобится только для подписи/нотаризации при публичном распространении — для личного использования и GitHub-релизов не требуется.
+1. **GitHub** (decided: set up at the start): I install the GitHub CLI (`brew install gh`), the user logs in once via `gh auth login` (browser, a couple of clicks). From then on I handle the repository, pushes and releases. Node.js v25 and npm are already installed — nothing else is needed for development.
+2. **Not needed now**: an Apple Developer account ($99/year) is required only for signing/notarization for public distribution — not for personal use and GitHub releases.
 
-## Верификация
+## Verification
 
-- Юнит-тесты движка (vitest) — главный контроль корректности сохранения.
-- Перекрёстное ревью агентов на каждом этапе.
-- Ручной прогон на реальных файлах: одностраничный отчёт с графиками, многослайдовая HTML-презентация, документ со `<style>`. Критерии: рендер совпадает с Chrome; правка одного слайда не ломает другие; удаление блока «подтягивает» документ; сохранённый файл в Chrome неотличим вне правок; PDF корректен.
-- Замер бюджетов: старт < 1.5 с, отклик < 16 мс, сохранение < 100 мс.
-- Запуск упакованного DMG на macOS arm64.
+- Engine unit tests (vitest) — the primary control of save correctness.
+- Cross-review by agents at every stage.
+- Manual runs on real files: a one-page report with charts, a multi-slide HTML presentation, a document with `<style>`. Criteria: rendering matches Chrome; editing one slide does not break the others; deleting a block "pulls up" the document; the saved file is indistinguishable in Chrome outside the edits; the PDF is correct.
+- Budget measurements: start < 1.5 s, response < 16 ms, save < 100 ms.
+- Running the packaged DMG on macOS arm64.
 
-## Решения Этапа 0 (дизайн-концепция)
+## Stage 0 decisions (design concept)
 
-- **Иконка: концепт Б** — красная плашка (#D9482B), белая строчная «r» + мигающая белая каретка.
-- **Выделение блоков — тихое, по образцу MarkMello**: при наведении — мягкая подложка (ink 3.5%) + волосяная линия (ink 13%), ручка ⋮⋮ нейтрально-серая. Редактируемый элемент — волосяная линия с отступом 5px. Красный акцент (#D9482B / #FF6B4A в тёмной) — ТОЛЬКО каретка и точка несохранённых изменений. Никаких красных рамок в UI редактирования.
-- Палитра оболочки: тёплая бумага #F7F6F3 / тёмная #1B1A18; референс-обложка MarkMello: тёмный экран, тёплый акцент, тихие кнопки.
-- Макеты: design/mockups/redra-concept.html
+- **Icon: concept B** — a red tile (#D9482B), a white lowercase "r" + a blinking white caret.
+- **Block selection — quiet, modeled on MarkMello**: on hover — a soft wash (ink 3.5%) + a hairline (ink 13%), the ⋮⋮ handle in neutral gray. The element being edited — a hairline with a 5px offset. The red accent (#D9482B / #FF6B4A in dark) — ONLY the caret and the unsaved-changes dot. No red frames anywhere in the editing UI.
+- Shell palette: warm paper #F7F6F3 / dark #1B1A18; MarkMello cover as the reference: dark screen, warm accent, quiet buttons.
+- Mockups: design/mockups/redra-concept.html
 
-## Решение из ревью Этапа 1
+## Decision from the Stage 1 review
 
-- **Сохранение без правок = байт-в-байт оригинал.** Если журнал операций пуст, в файл пишутся исходные байты (никакой нормализации parse5). Документы под git не получают фантомных диффов. serializeSource(doc) без операций возвращает оригинал; с операциями — сериализацию применённого дерева.
+- **Saving with no edits = byte-for-byte original.** If the operation journal is empty, the original bytes are written to the file (no parse5 normalization). Documents under git get no phantom diffs. serializeSource(doc) without operations returns the original; with operations — the serialization of the applied tree.
 
-## Известные ограничения v1
+## Known v1 limitations
 
-- **iframe**: подавление кликов и слой редактирования не достигают содержимого iframe (включая same-process iframe) — preload работает в главном фрейме, страница внутри iframe живёт своей жизнью и не редактируется.
-- **transform/filter на `<html>`**: CSS `transform`/`filter` на корневом элементе создаёт новый containing block для `position: fixed` — плашка-ручка блока на таких страницах может позиционироваться со смещением.
+- **iframe**: click suppression and the editing layer do not reach iframe content (including same-process iframes) — preload works in the main frame; the page inside an iframe lives its own life and is not editable.
+- **transform/filter on `<html>`**: CSS `transform`/`filter` on the root element creates a new containing block for `position: fixed` — the block-handle plate may be positioned with an offset on such pages.
 
-## Этап 5 решения (дистрибуция)
+## Stage 5 decisions (distribution)
 
-- **Лицензия: MIT** (copyright 2026 redraaya) — выбрана из пары MIT/GPL-3.0, заявленной в плане этапа.
-- **DMG только arm64, без подписи** (`identity: null`): аккаунта Apple Developer нет, нотаризация отложена. Gatekeeper-инструкция (правый клик → «Открыть», либо `xattr -cr`) задокументирована в README. Ассоциация `.html`/`.htm` — роль Editor с `LSHandlerRank: Alternate`: Redra появляется в «Открыть в программе…», не отбирая файлы у браузера.
-- **CI и релизы на macos-14 (Apple Silicon)**: ci.yml — тесты, typecheck и smoke на каждый push/PR в main (маковские раннеры поднимают настоящее окно Electron; если smoke окажется нестабильным — вынести в отдельный job); release.yml — по тегу `v*` собирает DMG (`CSC_IDENTITY_AUTO_DISCOVERY=false`) и публикует GitHub Release с автозаметками.
-- **Центральные резервные копии** (userData/backups вместо .bak рядом с документом) — зафиксированы ещё полевыми правками этапа 4, в этап 5 вошли без изменений.
-- **Скриншоты README** — скрытый режим `--screenshot` (гейт как у `--smoke`): светлая тема, одноразовый userData, композиция полосы оболочки и doc-view, синтезированный ховер ручки блока.
+- **License: MIT** (copyright 2026 redraaya) — chosen from the MIT/GPL-3.0 pair declared in the stage plan.
+- **DMG arm64 only, unsigned** (`identity: null`): no Apple Developer account, notarization postponed. The Gatekeeper walkthrough (right-click → "Open", or `xattr -cr`) is documented in the README. The `.html`/`.htm` association is an Editor role with `LSHandlerRank: Alternate`: Redra appears in "Open With…" without taking the files away from the browser.
+- **CI and releases on macos-14 (Apple Silicon)**: ci.yml — tests, typecheck and smoke on every push/PR to main (macOS runners can open a real Electron window; if smoke turns out flaky — move it into a separate job); release.yml — on a `v*` tag builds the DMG (`CSC_IDENTITY_AUTO_DISCOVERY=false`) and publishes a GitHub Release with auto-generated notes.
+- **Central backups** (userData/backups instead of a .bak next to the document) — locked in during the Stage 4 field fixes, entered Stage 5 unchanged.
+- **README screenshots** — a hidden `--screenshot` mode (gated like `--smoke`): light theme, throwaway userData, a composition of the shell strip and the doc view, a synthesized hover on the block handle.
 
-## Роадмап после v0.1.2 (зафиксирован с пользователем 2026-06-11)
+## Roadmap after v0.1.2 (locked with the user on 2026-06-11)
 
-**Цикл v0.2.0 — «работа с содержимым»:**
-1. Замена картинок: клик/драг на <img> → выбор файла; для однофайловых документов — встраивание base64 data: по умолчанию (документ остаётся самодостаточным). Операция setAttr.
-2. История версий: список центральных бэкапов с «вернуться к версии на момент открытия».
-3. Инлайн-тулбар при выделении текста: жирный / курсив / ссылка / код.
+**Cycle v0.2.0 — "working with content":**
+1. Image replacement: click/drag onto an <img> → file picker; for single-file documents — base64 data: embedding by default (the document stays self-contained). The setAttr operation.
+2. Version history: a list of the central backups with "go back to the version as of open".
+3. Inline toolbar on text selection: bold / italic / link / code.
 
-**Цикл v0.3.0 — «структура»:**
-4. Дублирование блока (третья кнопка на ручке: ⋮⋮, dup, корзина) — операция cloneBlock; копия из эталонного дерева, встаёт после оригинала. РЕШЕНИЕ: вместо Notion-вставки произвольных блоков — «дублировать и переписать» снимает проблему чужих стилей по построению (карточки, <tr>, <li>). «Пустой абзац после блока» — придержать, смотреть на потребность после dup.
-5. Перенос блоков между контейнерами (moveBlock с newParent).
-6. Поиск ⌘F.
+**Cycle v0.3.0 — "structure":**
+4. Block duplication (a third button on the handle: ⋮⋮, dup, trash) — the cloneBlock operation; the copy comes from the reference tree and lands after the original. DECISION: instead of Notion-style insertion of arbitrary blocks — "duplicate and rewrite" eliminates the foreign-styles problem by construction (cards, <tr>, <li>). "Empty paragraph after a block" — hold off, watch the demand after dup ships.
+5. Moving blocks between containers (moveBlock with newParent).
+6. Search ⌘F.
 
-**Этап 6 — Markdown-режим** (отдельный большой план): тот же принцип «правки поверх исходника» для .md; рендер с НАШЕЙ типографикой (старт — дизайн-концепция на утверждение); live-правка без режимов; маппинг операций обратно в Markdown-синтаксис.
+**Stage 6 — Markdown mode** (a separate large plan): the same "edits over the source" principle for .md; rendering with OUR typography (starts with a design concept for approval); live editing with no modes; mapping operations back into Markdown syntax.
 
-**Сознательно НЕ делаем:** открытие PDF (PDF — выход, не вход); создание документов с нуля и шаблоны (конкуренция с Notion/Word вне нашей ниши); Notion-меню вставки блоков.
+**Deliberately NOT doing:** opening PDFs (PDF is an output, not an input); creating documents from scratch and templates (competing with Notion/Word outside our niche); a Notion-style block-insert menu.
 
-**Инфраструктурно, перед крупными запусками (HN/PH):** Apple Developer + подпись/нотаризация; Windows-сборка как удвоение аудитории; гифка «тыц и пиши» в README.
+**Infrastructure, before big launches (HN/PH):** Apple Developer + signing/notarization; a Windows build as an audience doubler; a "click and write" GIF in the README.
