@@ -24,6 +24,23 @@
           <button id="update-close" type="button" title="Скрыть" aria-label="Скрыть">✕</button>
         </span>
         <span id="mode-pill" hidden>Просмотр</span>
+        <span id="find-bar" hidden>
+          <input id="find-input" type="text" placeholder="Найти…" spellcheck="false" autocomplete="off" />
+          <span id="find-count"></span>
+          <button id="find-prev" type="button" title="Предыдущее совпадение" aria-label="Предыдущее совпадение">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6 -6l6 6" /></svg>
+          </button>
+          <button id="find-next" type="button" title="Следующее совпадение" aria-label="Следующее совпадение">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg>
+          </button>
+          <button id="find-close" type="button" title="Закрыть поиск" aria-label="Закрыть поиск">✕</button>
+        </span>
+        <button class="tb-btn doc-only" id="btn-find" type="button" title="Найти (⌘F)" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 10a7 7 0 1 0 14 0a7 7 0 0 0 -14 0" />
+            <path d="M21 21l-6 -6" />
+          </svg>
+        </button>
         <button class="tb-btn doc-only" id="btn-preview" type="button" title="Просмотр (⌘E)" hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />

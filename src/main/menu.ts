@@ -13,6 +13,8 @@ export interface MenuHandlers {
   undo(): void;
   /** Cmd+Shift+Z. */
   redo(): void;
+  /** ⌘F — tells the focused window's SHELL to open the find bar. */
+  find(): void;
   /** Preview checkbox, Cmd+E. Receives the NEW checked state. */
   togglePreview(checked: boolean): void;
   /** Backup checkbox. Receives the NEW checked state. */
@@ -149,6 +151,14 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
       { role: 'copy', label: t('menu.copy') },
       { role: 'paste', label: t('menu.paste') },
       { role: 'selectAll', label: t('menu.selectAll') },
+      { type: 'separator' },
+      {
+        id: 'edit-find',
+        label: t('menu.find'),
+        accelerator: 'CmdOrCtrl+F',
+        enabled: docOpen,
+        click: () => handlers.find(),
+      },
     ],
   });
 

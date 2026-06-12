@@ -1,6 +1,8 @@
 import type { RecentEntry, RedraShellApi, Settings } from '../shared/ipc';
 import { makeT, pickLang } from '../shared/i18n';
 import { formatRelativeTime } from '../shared/relative-time';
+import { FindBarModel } from './find-bar';
+import type { FindCommand } from './find-bar';
 import { createNoticeToast } from './notice';
 import './style.css';
 
@@ -30,6 +32,13 @@ const btnPreview = $('btn-preview') as HTMLButtonElement;
 const btnPdf = $('btn-pdf') as HTMLButtonElement;
 const btnSave = $('btn-save') as HTMLButtonElement;
 const btnTheme = $('btn-theme') as HTMLButtonElement;
+const btnFind = $('btn-find') as HTMLButtonElement;
+const findBar = $('find-bar');
+const findInput = $('find-input') as HTMLInputElement;
+const findCount = $('find-count');
+const findPrev = $('find-prev') as HTMLButtonElement;
+const findNext = $('find-next') as HTMLButtonElement;
+const findClose = $('find-close') as HTMLButtonElement;
 const recentBlock = $('recent-block');
 const recentsEl = $('recents');
 const dropPill = $('drop-pill') as HTMLButtonElement;
@@ -44,6 +53,14 @@ const t = makeT(lang);
 
 modePill.textContent = t('shell.modePreview');
 btnPreview.title = t('shell.previewTooltip');
+btnFind.title = t('shell.findTooltip');
+findInput.placeholder = t('shell.findPlaceholder');
+findPrev.title = t('shell.findPrev');
+findPrev.setAttribute('aria-label', t('shell.findPrev'));
+findNext.title = t('shell.findNext');
+findNext.setAttribute('aria-label', t('shell.findNext'));
+findClose.title = t('shell.findClose');
+findClose.setAttribute('aria-label', t('shell.findClose'));
 btnPdf.title = t('shell.pdfTooltip');
 btnSave.title = t('shell.saveTooltip');
 dirtyDot.title = t('shell.dirtyTooltip');
@@ -94,6 +111,67 @@ btnPreview.addEventListener('click', () => redra.togglePreview());
 btnPdf.addEventListener('click', () => void redra.exportPdf());
 btnSave.addEventListener('click', () => void redra.save());
 
+// --- find in document (⌘F) ------------------------------------------------------
+
+// Pure state in FindBarModel; this block only wires DOM + the redra API.
+const findModel = new FindBarModel();
+
+function runFindCommands(commands: FindCommand[]): void {
+  for (const c of commands) {
+    if (c.kind === 'start') redra.findStart(c.text);
+    else if (c.kind === 'next') redra.findNext(c.text, c.forward);
+    else redra.findStop();
+  }
+}
+
+function syncFindBar(): void {
+  findBar.hidden = !findModel.open;
+  findCount.textContent = findModel.counter;
+  btnFind.classList.toggle('active', findModel.open);
+}
+
+function openFindBar(): void {
+  findModel.openBar();
+  syncFindBar();
+  findInput.focus();
+  findInput.select(); // the kept query restarts on the next keystroke
+}
+
+function closeFindBar(): void {
+  runFindCommands(findModel.close());
+  syncFindBar();
+}
+
+btnFind.addEventListener('click', () => {
+  if (findModel.open) closeFindBar();
+  else openFindBar();
+});
+
+findInput.addEventListener('input', () => {
+  runFindCommands(findModel.setText(findInput.value));
+  syncFindBar();
+});
+
+findInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    runFindCommands(findModel.step(!e.shiftKey));
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeFindBar();
+  }
+});
+
+findPrev.addEventListener('click', () => runFindCommands(findModel.step(false)));
+findNext.addEventListener('click', () => runFindCommands(findModel.step(true)));
+findClose.addEventListener('click', () => closeFindBar());
+
+redra.onFindOpen(() => openFindBar());
+redra.onFindResult((result) => {
+  findModel.applyResult(result);
+  syncFindBar();
+});
+
 // --- start screen: the drop pill doubles as «Open…» -----------------------------
 
 dropPill.addEventListener('click', () => void redra.openFileDialog());
@@ -107,7 +185,7 @@ redra.onDocOpened((info) => {
   docName.textContent = info.name;
   // Start screen → doc state: theme button yields to the document actions.
   btnTheme.hidden = true;
-  for (const b of [btnPreview, btnPdf, btnSave]) b.hidden = false;
+  for (const b of [btnFind, btnPreview, btnPdf, btnSave]) b.hidden = false;
   void renderRecents();
 });
 

@@ -160,6 +160,75 @@ body {
   color: var(--muted);
 }
 
+/* --- find bar (⌘F) — quiet hairline strip at the right of the titlebar --- */
+
+#find-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  -webkit-app-region: no-drag;
+}
+
+#find-bar[hidden] {
+  display: none;
+}
+
+#find-input {
+  width: 200px;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  user-select: text;
+}
+
+#find-input::placeholder {
+  color: var(--muted);
+}
+
+#find-count {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 0 2px;
+}
+
+#find-bar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  cursor: default;
+}
+
+#find-bar button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+#find-bar button svg {
+  width: 13px;
+  height: 13px;
+}
+
+#find-close {
+  font-size: 10px;
+  line-height: 1;
+}
+
 /* Transient rejected-op toast — same quiet pill recipe. It sits INSIDE the
    44px strip: everything below is covered by the document WebContentsView,
    which composites above this renderer, so a bottom-of-window toast would

@@ -15,6 +15,10 @@
  *
  * Channels (shell renderer → main, send):
  *   'mode:toggle'      ()  — flip Preview; main stays the single source of truth
+ *   'find:start'       (text: string)            — findInPage on the doc view
+ *                                                  (new session); empty text stops
+ *   'find:next'        (text: string, forward: boolean) — step the active session
+ *   'find:stop'        ()                        — stopFindInPage('clearSelection')
  *   'update:open'      (url: string)     — open the release page; main re-checks
  *                                          the url is https://github.com/redraaya/Redra/…
  *   'update:dismiss'   (version: string) — persist dismissedUpdateVersion
@@ -50,6 +54,8 @@
  *   'doc:dirtyChanged'  DirtyState   — pushed on every ops push/undo/redo/save
  *   'mode:changed'      ModeState    — Preview toggled
  *   'notice:show'       NoticeInfo   — transient quiet toast (rejected-op notice)
+ *   'find:open'         ()           — menu ⌘F: open the titlebar find bar
+ *   'find:result'       FindResult   — found-in-page from the doc view (counter)
  *   'update:available'  UpdateInfo   — once per launch, ~8s after ready, only
  *                                      when a newer non-dismissed release exists
  *
@@ -121,6 +127,13 @@ export interface ModeState {
 export interface NoticeInfo {
   /** Already-localized text (main owns the locale). */
   text: string;
+}
+
+/** Payload of 'find:result' — match counter fields of Electron's found-in-page. */
+export interface FindResult {
+  /** 1-based position of the active match; 0 when there are no matches. */
+  activeMatchOrdinal: number;
+  matches: number;
 }
 
 /** Payload of 'update:available' — a newer release the user has not dismissed. */
@@ -207,6 +220,13 @@ export interface RedraShellApi {
   exportPdf(): Promise<ExportResult>;
   /** Flip Preview — main owns the state and answers with 'mode:changed'. */
   togglePreview(): void;
+  /** Find in the document (native findInPage on the doc view). */
+  findStart(text: string): void;
+  findNext(text: string, forward: boolean): void;
+  findStop(): void;
+  /** Menu ⌘F routed to this window's shell: open the find bar. */
+  onFindOpen(cb: () => void): void;
+  onFindResult(cb: (result: FindResult) => void): void;
   getRecents(): Promise<RecentEntry[]>;
   getSettings(): Promise<Settings>;
   setSettings(patch: Partial<Settings>): Promise<Settings>;

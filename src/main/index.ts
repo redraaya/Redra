@@ -163,6 +163,10 @@ const menuHandlers = {
   exportPdf: () => void focusedCtx()?.saveFlow.exportPdf(),
   undo: () => focusedCtx()?.docView?.webContents.send('edit:undo'),
   redo: () => focusedCtx()?.docView?.webContents.send('edit:redo'),
+  find: () => {
+    const ctx = focusedCtx();
+    if (ctx?.docManager.currentDoc) sendToShell(ctx, 'find:open', {});
+  },
   togglePreview: (checked: boolean) => {
     const ctx = focusedCtx();
     if (ctx) setPreview(ctx, checked);
@@ -504,6 +508,15 @@ function ensureDocView(ctx: WindowContext): WebContentsView {
     });
   });
 
+  // Find in document: forward the native match counter to THIS window's
+  // shell (the find bar lives there; the search runs in the doc view).
+  wc.on('found-in-page', (_event, result) => {
+    sendToShell(ctx, 'find:result', {
+      activeMatchOrdinal: result.activeMatchOrdinal,
+      matches: result.matches,
+    });
+  });
+
   // Navigation policy: http(s) → external browser; same-doc redra:// root
   // allowed; dropped .html files open in Redra; everything else denied.
   wc.on('will-navigate', (event, url) => {
@@ -798,6 +811,28 @@ function registerIpc(): void {
     const ctx = shellCtx(event);
     if (!ctx?.docManager.currentDoc) return; // no doc — nothing to preview
     setPreview(ctx, !ctx.previewOn);
+  });
+  // --- find in document (⌘F, v0.3.0) ---
+  // The bar lives in the shell, the search runs on that window's DOC view.
+  // NB Electron semantics: findNext:true BEGINS a session, false steps it.
+  const MAX_FIND_TEXT = 1024;
+  const findTarget = (event: IpcMainEvent): Electron.WebContents | null => {
+    const wc = shellCtx(event)?.docView?.webContents;
+    return wc && !wc.isDestroyed() ? wc : null;
+  };
+  ipcMain.on('find:start', (event, text: unknown) => {
+    const wc = findTarget(event);
+    if (!wc || typeof text !== 'string' || text.length > MAX_FIND_TEXT) return;
+    if (text.length === 0) wc.stopFindInPage('clearSelection');
+    else wc.findInPage(text, { findNext: true });
+  });
+  ipcMain.on('find:next', (event, text: unknown, forward: unknown) => {
+    const wc = findTarget(event);
+    if (!wc || typeof text !== 'string' || text.length === 0 || text.length > MAX_FIND_TEXT) return;
+    wc.findInPage(text, { findNext: false, forward: forward !== false });
+  });
+  ipcMain.on('find:stop', (event) => {
+    findTarget(event)?.stopFindInPage('clearSelection');
   });
   ipcMain.handle('recents:get', (event): RecentEntry[] => {
     if (!shellCtx(event)) return [];
