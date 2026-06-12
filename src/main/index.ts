@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, shell } fro
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,7 @@ import { BackupStore } from './lib/backups.js';
 import { RecentsStore } from './recents-store.js';
 import { SettingsStore } from './settings-store.js';
 import { buildAppMenu, setBackupMenuChecked, setDocMenuEnabled } from './menu.js';
+import type { VersionMenuItem } from './menu.js';
 import { EDITOR_CSS } from './editor-css.js';
 import { PerfLog } from './lib/perf.js';
 import { senderMatches } from './lib/sender.js';
@@ -20,11 +21,20 @@ import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
 import { guardDocPush } from './lib/op-guard.js';
+import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
+import { getElementById } from '../engine/index.js';
+import {
+  buildImageDataUri,
+  IMAGE_EXTENSIONS,
+  isAllowedImagePath,
+  MAX_IMAGE_BYTES,
+} from './lib/image-data.js';
 import { createSaveFlow } from './save-flow.js';
 import { ScreenshotHarness } from './screenshot.js';
 import { SmokeHarness } from './smoke.js';
 import type {
   ExportResult,
+  ImageValueResult,
   OpPushResult,
   OpUndoResult,
   OpenResult,
@@ -58,8 +68,12 @@ let recents: RecentsStore;
 let settingsStore: SettingsStore;
 /** Central session backups folder (userData/backups) — set in onReady. */
 let backupsDir = '';
-/** How many central backups survive a prune. */
-const BACKUPS_KEEP = 30;
+let backupStore: BackupStore | null = null;
+/** Prune budget: newest versions kept per document / store-wide. */
+const BACKUPS_KEEP_PER_FILE = 10;
+const BACKUPS_KEEP_GLOBAL = 100;
+/** «История версий» shows at most this many entries. */
+const VERSION_MENU_MAX = 10;
 
 let win: BrowserWindow | null = null;
 let docView: WebContentsView | null = null;
@@ -74,6 +88,104 @@ let quitRequested = false;
  * before any menu or dialog is built.
  */
 let t = makeT('en');
+
+/** Handlers shared by every (re)build of the application menu. */
+const menuHandlers = {
+  open: () => void openViaDialog(),
+  save: () => void saveFlow.doSave(false),
+  saveAs: () => void saveFlow.doSave(true),
+  exportPdf: () => void saveFlow.exportPdf(),
+  undo: () => docView?.webContents.send('edit:undo'),
+  redo: () => docView?.webContents.send('edit:redo'),
+  togglePreview: (checked: boolean) => setPreview(checked),
+  toggleBackup: (checked: boolean) => void applySettings({ backupOnFirstSave: checked }),
+  showBackups: () => void showBackupsFolder(),
+  restoreVersion: (v: VersionMenuItem) => void restoreVersion(v),
+};
+
+/**
+ * (Re)build the whole application menu. Electron menus are static once set,
+ * and «История версий» is data-driven — so the menu is rebuilt on startup,
+ * on every document open/close and after every backup write. Cheap: a
+ * readdir + template build.
+ */
+async function rebuildAppMenu(): Promise<void> {
+  const cur = docManager.currentDoc;
+  let versions: VersionMenuItem[] = [];
+  if (cur && backupStore) {
+    const entries = await backupStore.list(cur.filePath).catch(() => []);
+    const locale = pickLang(app.getLocale()) === 'ru' ? 'ru-RU' : 'en-US';
+    const fmt = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
+    versions = entries.slice(0, VERSION_MENU_MAX).map((e) => {
+      const dateLabel = fmt.format(new Date(e.savedAt));
+      const kb = Math.max(1, Math.round(e.size / 1024));
+      return { label: `${dateLabel} · ${kb} ${t('unit.kb')}`, dateLabel, backupPath: e.path };
+    });
+  }
+  buildAppMenu(menuHandlers, {
+    backupChecked: settingsStore.get().backupOnFirstSave,
+    t,
+    docOpen: !!cur,
+    previewChecked: previewOn,
+    versions,
+  });
+}
+
+/**
+ * «История версий» click: guard unsaved edits, confirm, snapshot the current
+ * disk state (inside openFromBackup), swap the document content to the
+ * chosen version and reload the view. The file on disk is untouched until
+ * the user saves — the shell shows the dirty dot, ⌘S writes the restored
+ * bytes.
+ */
+async function restoreVersion(v: VersionMenuItem): Promise<void> {
+  const w = win;
+  if (!docManager.currentDoc || !w) return;
+  // Captured BEFORE any await: the dialogs below keep the menu/window alive,
+  // so the user can open a DIFFERENT document mid-flow — document A's backup
+  // must never be restored over document B (see the re-check further down).
+  const expectedDocId = docManager.currentDoc.docId;
+  // Menu entries are ours, but never read a restore source from outside the store.
+  if (!path.resolve(v.backupPath).startsWith(backupsDir + path.sep)) return;
+  await commitActiveEdit();
+  // openFromBackup snapshots only the DISK bytes — unsaved journal ops would
+  // be discarded silently. Same three-button guard as window close / open-
+  // over-dirty; the restore confirm below still answers its own question.
+  const cur = docManager.currentDoc;
+  if (!cur) return;
+  const proceed = await resolveUnsavedBeforeRestore({
+    journalDirty: cur.journal.dirty,
+    askUnsavedChanges: () => saveFlow.askUnsavedChanges(w, path.basename(cur.filePath)),
+    save: () => saveFlow.doSave(false),
+  });
+  if (!proceed) return;
+  const { response } = await dialog.showMessageBox(w, {
+    type: 'warning',
+    message: t('dialog.restore.message').replace('{date}', v.dateLabel),
+    detail: t('dialog.restore.detail'),
+    buttons: [t('dialog.restore.confirm'), t('dialog.cancel')],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (response !== 0) return;
+  // Stale-document re-check: three dialogs were awaited above — if the user
+  // opened another document meanwhile, this restore belongs to a document
+  // that is no longer current. Abort silently (the belt-and-braces check
+  // inside openFromBackup would throw the same way).
+  if (docManager.currentDoc?.docId !== expectedDocId) return;
+  try {
+    const { opened } = await docManager.openFromBackup(v.backupPath, expectedDocId);
+    const view = ensureDocView();
+    await view.webContents.loadURL(`redra://doc/${opened.docId}/`);
+    setPreview(false); // restored documents open in live editing, like any open
+    broadcastDirty();
+    void rebuildAppMenu(); // the pre-restore snapshot just added a version
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[restore] failed:', message);
+    dialog.showErrorBox(t('error.restoreTitle'), message);
+  }
+}
 
 // Save / export / close-guard flows live in save-flow.ts; index only wires.
 const saveFlow = createSaveFlow({
@@ -128,27 +240,18 @@ async function onReady(): Promise<void> {
 
   // Central backups instead of .bak files next to the user's documents.
   // Existing .bak files are the user's property — never touched or removed.
+  // Timestamped since v0.2.0: each write is a new version (Date.now() is
+  // passed HERE — BackupStore itself never reads the clock).
   backupsDir = path.join(app.getPath('userData'), 'backups');
   const store = new BackupStore(backupsDir);
+  backupStore = store;
   docManager.setBackupWriter(async (filePath, bytes) => {
-    await store.backupFor(filePath, bytes);
-    await store.prune(BACKUPS_KEEP);
+    await store.backupFor(filePath, bytes, Date.now());
+    await store.prune(BACKUPS_KEEP_PER_FILE, BACKUPS_KEEP_GLOBAL);
+    void rebuildAppMenu(); // a new version just appeared in «История версий»
   });
 
-  buildAppMenu(
-    {
-      open: () => void openViaDialog(),
-      save: () => void saveFlow.doSave(false),
-      saveAs: () => void saveFlow.doSave(true),
-      exportPdf: () => void saveFlow.exportPdf(),
-      undo: () => docView?.webContents.send('edit:undo'),
-      redo: () => docView?.webContents.send('edit:redo'),
-      togglePreview: (checked) => setPreview(checked),
-      toggleBackup: (checked) => void applySettings({ backupOnFirstSave: checked }),
-      showBackups: () => void showBackupsFolder(),
-    },
-    { backupChecked: settingsStore.get().backupOnFirstSave, t },
-  );
+  await rebuildAppMenu();
   registerIpc();
   createWindow(readyAt);
   scheduleUpdateCheck();
@@ -239,6 +342,7 @@ function createWindow(readyAt: number): void {
     docManager.close();
     setDocMenuEnabled(false);
     setPreview(false);
+    void rebuildAppMenu(); // version submenu empties with the document
   });
 
   if (process.env['ELECTRON_RENDERER_URL']) {
@@ -437,8 +541,8 @@ function commitActiveEdit(): Promise<void> {
 }
 
 function broadcastDirty(): void {
-  const cur = docManager.currentDoc;
-  win?.webContents.send('doc:dirtyChanged', { dirty: cur ? cur.journal.dirty : false });
+  // isDirty covers both journal ops and a restored-but-unsaved backup.
+  win?.webContents.send('doc:dirtyChanged', { dirty: docManager.isDirty() });
 }
 
 // --- open flow ---------------------------------------------------------------
@@ -454,7 +558,7 @@ async function openDocument(filePath: string): Promise<OpenResult> {
     // In-flight typed text counts as unsaved — commit it into the journal first.
     await commitActiveEdit();
     const cur = docManager.currentDoc;
-    if (cur && cur.journal.dirty) {
+    if (cur && docManager.isDirty()) {
       const choice = await saveFlow.askUnsavedChanges(win, path.basename(cur.filePath));
       if (choice === 'cancel') return { ok: false, canceled: true };
       if (choice === 'save') {
@@ -480,9 +584,10 @@ async function openDocument(filePath: string): Promise<OpenResult> {
     win?.setTitle(`${name} — Redra`);
     setDocMenuEnabled(true);
     win?.webContents.send('doc:opened', { path: opened.filePath, name });
-    win?.webContents.send('doc:dirtyChanged', { dirty: opened.journal.dirty });
+    win?.webContents.send('doc:dirtyChanged', { dirty: docManager.isDirty() });
     // A fresh document always starts in live editing, never in «Просмотр».
     setPreview(false);
+    void rebuildAppMenu(); // «История версий» entries for THIS file
 
     app.addRecentDocument(opened.filePath);
     await recents.add(opened.filePath);
@@ -590,11 +695,28 @@ function registerIpc(): void {
     const checked = guardDocPush(docId, raw, cur.docId, cur.doc, cur.journal.ops);
     if (!checked.ok) {
       console.error('[ops] rejected push:', checked.error);
-      return { ok: false, error: checked.error };
+      // Localized HERE (main owns the locale); the preload only relays it.
+      // 'stale-doc' stays silent on purpose: the op belongs to a document
+      // that was replaced — there is nothing the user did wrong just now.
+      const userMessage =
+        checked.code === 'blocked-subtree'
+          ? t('notice.blockedBlock')
+          : checked.code === 'invalid'
+            ? t('notice.opRejected')
+            : undefined;
+      return { ok: false, error: checked.error, code: checked.code, userMessage };
     }
     cur.journal.push(checked.op);
     broadcastDirty();
     return { ok: true };
+  });
+  // A rejected push the preload rolled back: forward main's own localized
+  // text to the shell as a transient toast. Length-capped defense in depth —
+  // the doc preload only ever echoes a userMessage main produced above.
+  ipcMain.on('ops:rejected-notice', (event, message: unknown) => {
+    if (!senderMatches(event, docView?.webContents)) return;
+    if (typeof message !== 'string' || message.length === 0 || message.length > 500) return;
+    win?.webContents.send('notice:show', { text: message });
   });
   ipcMain.handle('ops:undo', (event, docId: unknown): OpUndoResult => {
     if (!fromDoc(event)) return { ok: false, dirty: false };
@@ -612,6 +734,43 @@ function registerIpc(): void {
     broadcastDirty();
     return { ok, dirty: cur.journal.dirty };
   });
+  // --- image replacement (v0.2.0) ---
+  // Both channels answer with the value the preload should set as img.src:
+  // v1 ALWAYS a base64 data: URI (single-file documents stay self-contained;
+  // nothing is copied next to the document). The op itself still arrives via
+  // the guarded ops:push — these channels only turn a file into a value.
+  ipcMain.handle(
+    'image:pick',
+    async (event, docId: unknown, id: unknown): Promise<ImageValueResult> => {
+      if (!fromDoc(event)) return { ok: false, error: 'bad sender' };
+      const guard = guardImageRequest(docId, id);
+      if (guard) return guard;
+      if (!win) return { ok: false, canceled: true };
+      const result = await dialog.showOpenDialog(win, {
+        properties: ['openFile'],
+        filters: [{ name: t('dialog.imagesFilter'), extensions: [...IMAGE_EXTENSIONS] }],
+      });
+      const first = result.filePaths[0];
+      if (result.canceled || !first) return { ok: false, canceled: true };
+      return imageValueFromFile(first);
+    },
+  );
+  ipcMain.handle(
+    'image:fromPath',
+    async (event, docId: unknown, id: unknown, filePath: unknown): Promise<ImageValueResult> => {
+      if (!fromDoc(event)) return { ok: false, error: 'bad sender' };
+      const guard = guardImageRequest(docId, id);
+      if (guard) return guard;
+      if (typeof filePath !== 'string' || filePath.length === 0) {
+        return { ok: false, error: 'bad path' };
+      }
+      if (!isAllowedImagePath(filePath)) {
+        dialog.showErrorBox(t('error.imageTitle'), t('image.badType'));
+        return { ok: false, error: 'not an image' };
+      }
+      return imageValueFromFile(filePath);
+    },
+  );
   ipcMain.handle('link:openExternal', (event, url: unknown) => {
     if (!fromDoc(event)) return;
     if (typeof url !== 'string') return;
@@ -630,4 +789,38 @@ function registerIpc(): void {
     if (!senderMatches(event, docView?.webContents)) return;
     smoke.onEditorReady();
   });
+}
+
+/**
+ * Shared image:pick / image:fromPath gate: docId + target element, which
+ * must be an <img> — same rule validateOp enforces for the setAttr op, so
+ * a compromised preload cannot use these channels to read files on behalf
+ * of a non-image element. Null = ok.
+ */
+function guardImageRequest(docId: unknown, id: unknown): ImageValueResult | null {
+  const cur = docManager.currentDoc;
+  if (!cur || docId !== cur.docId) return { ok: false, error: 'stale document' };
+  const el = typeof id === 'string' ? getElementById(cur.doc, id) : undefined;
+  if (!el) return { ok: false, error: 'unknown element' };
+  if (el.tagName !== 'img') return { ok: false, error: 'target is not an <img>' }; // parse5 tagNames are lowercase
+  return null;
+}
+
+/** Read + size-cap + embed. User-visible failures get a dialog right here. */
+async function imageValueFromFile(filePath: string): Promise<ImageValueResult> {
+  try {
+    const st = await stat(filePath);
+    if (!st.isFile()) throw new Error(`not a file: ${filePath}`);
+    if (st.size > MAX_IMAGE_BYTES) {
+      dialog.showErrorBox(t('error.imageTitle'), t('image.tooBig'));
+      return { ok: false, error: 'too big' };
+    }
+    const bytes = await readFile(filePath);
+    return { ok: true, value: buildImageDataUri(filePath, bytes) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[image] failed:', message);
+    dialog.showErrorBox(t('error.imageTitle'), message);
+    return { ok: false, error: message };
+  }
 }

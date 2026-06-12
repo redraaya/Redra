@@ -34,6 +34,8 @@ const STRINGS = {
   'menu.exportPdf': { ru: 'Экспорт в PDF…', en: 'Export to PDF…' },
   'menu.backup': { ru: 'Создавать резервную копию', en: 'Keep a backup of the original' },
   'menu.showBackups': { ru: 'Показать резервные копии', en: 'Show backups' },
+  'menu.versionHistory': { ru: 'История версий', en: 'Version History' },
+  'menu.noVersions': { ru: 'Нет сохранённых версий', en: 'No saved versions' },
   'menu.edit': { ru: 'Правка', en: 'Edit' },
   'menu.undo': { ru: 'Отменить', en: 'Undo' },
   'menu.redo': { ru: 'Повторить', en: 'Redo' },
@@ -62,6 +64,17 @@ const STRINGS = {
     en: 'Overwrite it with the version from Redra? The external changes will be lost.',
   },
   'dialog.conflict.overwrite': { ru: 'Перезаписать', en: 'Overwrite' },
+  'dialog.restore.message': {
+    ru: 'Восстановить версию от {date}?',
+    en: 'Restore the version from {date}?',
+  },
+  'dialog.restore.detail': {
+    ru: 'Текущее состояние файла будет сохранено в резервные копии.',
+    en: 'The current state of the file will be backed up first.',
+  },
+  'dialog.restore.confirm': { ru: 'Восстановить', en: 'Restore' },
+  'error.restoreTitle': { ru: 'Не удалось восстановить версию', en: 'Can’t restore version' },
+  'unit.kb': { ru: 'КБ', en: 'KB' },
   'error.noDocument': { ru: 'Документ не открыт', en: 'No document is open' },
   'error.keepsChanging': {
     ru: 'Файл на диске продолжает меняться — сохранение прервано',
@@ -71,6 +84,22 @@ const STRINGS = {
   'error.saveTitle': { ru: 'Не удалось сохранить', en: 'Can’t save' },
   'error.pdfTitle': { ru: 'Не удалось экспортировать PDF', en: 'Can’t export PDF' },
   'error.openTitle': { ru: 'Не удалось открыть файл', en: 'Can’t open file' },
+  'error.imageTitle': { ru: 'Не удалось заменить картинку', en: 'Can’t replace image' },
+  'image.tooBig': {
+    ru: 'Картинка слишком большая (макс. 10 МБ)',
+    en: 'Image is too large (max 10 MB)',
+  },
+  'image.badType': {
+    ru: 'Файл не похож на картинку (PNG, JPEG, WebP, GIF, SVG, AVIF)',
+    en: 'The file is not an image (PNG, JPEG, WebP, GIF, SVG, AVIF)',
+  },
+  'dialog.imagesFilter': { ru: 'Картинки', en: 'Images' },
+  // Rejected-op toast (quiet pill in the shell strip, auto-hides).
+  'notice.blockedBlock': {
+    ru: 'Это действие нельзя применить к уже изменённому блоку — сначала сохраните и переоткройте файл',
+    en: 'This action can’t apply to an already-edited block — save and reopen the file first',
+  },
+  'notice.opRejected': { ru: 'Действие отменено', en: 'Action couldn’t be applied' },
 
   // --- shell renderer (start screen + titlebar) -------------------------------
   'shell.tagline': {
@@ -97,6 +126,13 @@ const STRINGS = {
   // --- doc editing overlay -----------------------------------------------------
   'overlay.drag': { ru: 'Перетащить блок', en: 'Drag block' },
   'overlay.delete': { ru: 'Удалить блок', en: 'Delete block' },
+  'overlay.replaceImage': { ru: 'Заменить картинку', en: 'Replace image' },
+  'toolbar.bold': { ru: 'Жирный', en: 'Bold' },
+  'toolbar.italic': { ru: 'Курсив', en: 'Italic' },
+  'toolbar.code': { ru: 'Код', en: 'Code' },
+  'toolbar.link': { ru: 'Ссылка', en: 'Link' },
+  'toolbar.linkPlaceholder': { ru: 'Адрес ссылки', en: 'Link URL' },
+  'toolbar.removeLink': { ru: 'Убрать ссылку', en: 'Remove link' },
 } as const satisfies Record<string, { ru: string; en: string }>;
 
 export type StringKey = keyof typeof STRINGS;

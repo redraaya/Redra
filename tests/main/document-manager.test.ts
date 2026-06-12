@@ -104,6 +104,130 @@ describe('DocumentManager mtime conflict', () => {
   });
 });
 
+describe('DocumentManager.openFromBackup (version history restore)', () => {
+  const original = '<!doctype html><html><head></head><body><p>версия 1</p></body></html>';
+
+  /** Open `doc.html`, edit, save (disk = v2, backup = v1), return the pieces. */
+  async function setupEditedDoc() {
+    const file = path.join(dir, 'doc.html');
+    await writeFile(file, original);
+    const dm = new DocumentManager(new PerfLog());
+    const backups: Array<{ filePath: string; bytes: Buffer }> = [];
+    dm.setBackupWriter(async (filePath, bytes) => {
+      backups.push({ filePath, bytes });
+    });
+    const { opened } = await dm.open(file);
+    opened.journal.push({ type: 'editText', id: pId(opened), html: 'версия 2' });
+    expect((await dm.save()).ok).toBe(true);
+    expect(await readFile(file, 'utf8')).toContain('версия 2');
+    // Simulate the central store: the backup file holds the v1 bytes.
+    const backupPath = path.join(dir, 'doc.html.aabbccdd.20260612-102030.orig.html');
+    await writeFile(backupPath, backups[0]!.bytes);
+    return { dm, file, backupPath, backups };
+  }
+
+  it('full restore-save round-trip: safety backup + no skip-write + flag cleared', async () => {
+    const { dm, file, backupPath, backups } = await setupEditedDoc();
+    const oldDocId = dm.currentDoc!.docId;
+
+    const { opened } = await dm.openFromBackup(backupPath);
+
+    // The restore itself is undoable: pre-restore DISK bytes (v2) were backed up.
+    expect(backups).toHaveLength(2);
+    expect(backups[1]!.filePath).toBe(file);
+    expect(backups[1]!.bytes.toString('utf8')).toContain('версия 2');
+
+    // The document is the backup content under the SAME path, marked dirty.
+    expect(opened.filePath).toBe(file);
+    expect(opened.docId).not.toBe(oldDocId);
+    expect(opened.journal.dirty).toBe(false); // ops-based journal stays clean…
+    expect(dm.isDirty()).toBe(true); // …the restored flag carries the dirty state
+    expect(opened.stampedHtml).toContain('версия 1');
+
+    // Save with an EMPTY journal must WRITE (no skip): disk returns to v1.
+    const saved = await dm.save();
+    expect(saved.ok).toBe(true);
+    if (saved.ok) expect(saved.skipped).not.toBe(true);
+    expect(await readFile(file, 'utf8')).toBe(original);
+    expect(dm.isDirty()).toBe(false); // flag cleared by the successful save
+
+    // And the next no-op save skips again, as usual.
+    expect(await dm.save()).toMatchObject({ ok: true, skipped: true });
+  });
+
+  it('re-stats the file at restore time so the save does not false-conflict', async () => {
+    const { dm, file, backupPath } = await setupEditedDoc();
+    // External mtime bump AFTER our last save — normally a conflict…
+    const future = new Date(Date.now() + 5_000);
+    await utimes(file, future, future);
+    await dm.openFromBackup(backupPath);
+    // …but the restore adopted the current on-disk state as the base.
+    expect((await dm.save()).ok).toBe(true);
+    expect(await readFile(file, 'utf8')).toBe(original);
+  });
+
+  it('editing after a restore works on the restored tree', async () => {
+    const { dm, backupPath, file } = await setupEditedDoc();
+    const { opened } = await dm.openFromBackup(backupPath);
+    opened.journal.push({ type: 'editText', id: pId(opened), html: 'правка поверх восстановленного' });
+    expect((await dm.save()).ok).toBe(true);
+    const onDisk = await readFile(file, 'utf8');
+    expect(onDisk).toContain('правка поверх восстановленного');
+    expect(onDisk).not.toContain('версия 2');
+  });
+
+  it('discards unsaved journal ops — callers must run the unsaved-changes guard first', async () => {
+    const { dm, backupPath } = await setupEditedDoc();
+    const cur = dm.currentDoc!;
+    cur.journal.push({ type: 'editText', id: pId(cur), html: 'несохранённая правка' });
+    expect(cur.journal.dirty).toBe(true);
+
+    const { opened } = await dm.openFromBackup(backupPath);
+
+    // Pinned semantics: the restored document starts with a FRESH journal.
+    // Unsaved ops do NOT survive — restoreVersion (index.ts) is responsible
+    // for asking «Сохранить / Не сохранять / Отмена» BEFORE calling this.
+    expect(opened.journal.ops).toHaveLength(0);
+    expect(opened.journal.dirty).toBe(false);
+    expect(opened.stampedHtml).toContain('версия 1');
+    expect(opened.stampedHtml).not.toContain('несохранённая правка');
+  });
+
+  it('throws without an open document and leaves no state behind', async () => {
+    const dm = new DocumentManager(new PerfLog());
+    await expect(dm.openFromBackup('/nowhere.orig.html')).rejects.toThrow();
+    expect(dm.currentDoc).toBeNull();
+  });
+
+  it('a missing backup file fails the restore and keeps the current document', async () => {
+    const { dm, backupPath } = await setupEditedDoc();
+    const before = dm.currentDoc!;
+    await expect(dm.openFromBackup(backupPath + '.gone')).rejects.toThrow();
+    expect(dm.currentDoc).toBe(before);
+    expect(dm.isDirty()).toBe(false);
+  });
+
+  it('rejects a stale expectedDocId — the document was swapped mid-flow — and touches nothing', async () => {
+    const { dm, backupPath, backups } = await setupEditedDoc();
+    const before = dm.currentDoc!;
+    const backupsBefore = backups.length;
+
+    await expect(dm.openFromBackup(backupPath, 'stale-doc-id')).rejects.toThrow();
+
+    // Untouched: same document object, no dirty flag, no extra safety backup.
+    expect(dm.currentDoc).toBe(before);
+    expect(dm.isDirty()).toBe(false);
+    expect(backups).toHaveLength(backupsBefore);
+  });
+
+  it('proceeds when expectedDocId matches the current document', async () => {
+    const { dm, backupPath } = await setupEditedDoc();
+    const { opened } = await dm.openFromBackup(backupPath, dm.currentDoc!.docId);
+    expect(opened.stampedHtml).toContain('версия 1');
+    expect(dm.isDirty()).toBe(true);
+  });
+});
+
 describe('DocumentManager backup setting (injected backupWriter)', () => {
   /** Fake central-backup writer: records calls, writes nothing anywhere. */
   function makeWriter() {

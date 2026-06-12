@@ -18,6 +18,13 @@ function makeBridge() {
     undo: vi.fn(async () => ({ ok: true, dirty: false })),
     redo: vi.fn(async () => ({ ok: true, dirty: false })),
     openExternal: vi.fn(),
+    pickImage: vi.fn(async () => ({ ok: true as const, value: 'data:image/png;base64,AA' })),
+    replaceImageFromPath: vi.fn(async () => ({
+      ok: true as const,
+      value: 'data:image/png;base64,BB',
+    })),
+    pathForFile: vi.fn(() => '/tmp/dropped.png'),
+    notifyRejected: vi.fn(),
   } satisfies RedraDocBridge;
 }
 
@@ -86,6 +93,33 @@ describe('controller rollback & lockstep (jsdom)', () => {
     await flush();
     expect(bridge.undo).not.toHaveBeenCalled();
     expect(a.innerHTML).toBe('привет мир');
+  });
+
+  it('relays main’s localized userMessage via notifyRejected (and only then)', async () => {
+    bridge.pushOp.mockResolvedValueOnce({
+      ok: false,
+      error: '"rA" is inside an edited/deleted block',
+      code: 'blocked-subtree',
+      userMessage: 'Это действие нельзя применить к уже изменённому блоку',
+    } as never);
+    const a = el('a');
+    click(a);
+    a.innerHTML = 'не пройдёт';
+    blur(a);
+    await flush();
+
+    expect(bridge.notifyRejected).toHaveBeenCalledTimes(1);
+    expect(bridge.notifyRejected).toHaveBeenCalledWith(
+      'Это действие нельзя применить к уже изменённому блоку',
+    );
+
+    // No userMessage (e.g. stale-doc) → rollback stays SILENT.
+    bridge.pushOp.mockResolvedValueOnce({ ok: false, error: 'stale', code: 'stale-doc' } as never);
+    click(a);
+    a.innerHTML = 'тоже не пройдёт';
+    blur(a);
+    await flush();
+    expect(bridge.notifyRejected).toHaveBeenCalledTimes(1);
   });
 
   it('a rejected push discards ONLY the rejected entry — earlier history survives', async () => {

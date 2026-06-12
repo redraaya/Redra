@@ -3,16 +3,17 @@ import { parseDocument } from '../../src/engine/index.js';
 import type { Op } from '../../src/engine/index.js';
 import { checkOpAgainstActive, guardDocPush } from '../../src/main/lib/op-guard.js';
 
-// <html>=r0 <head>=r1 <body>=r2 <section>=r3 <p>=r4 <span>=r5 <p>=r6 <div>=r7
+// <html>=r0 <head>=r1 <body>=r2 <section>=r3 <p>=r4 <span>=r5 <p>=r6 <div>=r7 <img>=r8
 const doc = parseDocument(
   '<!doctype html><html><head></head><body>' +
-    '<section><p>a<span>s</span></p><p>b</p></section><div>c</div>' +
+    '<section><p>a<span>s</span></p><p>b</p></section><div>c</div><img src="x.png">' +
     '</body></html>',
 );
 
 const editText = (id: string, html = 'x'): Op => ({ type: 'editText', id, html });
 const deleteBlock = (id: string): Op => ({ type: 'deleteBlock', id });
 const moveBlock = (id: string, beforeId: string | null): Op => ({ type: 'moveBlock', id, beforeId });
+const setAttr = (id: string, value = 'a.png'): Op => ({ type: 'setAttr', id, name: 'src', value });
 
 describe('checkOpAgainstActive (blocked subtrees, mirrors applyOps)', () => {
   it('rejects deleteBlock on a descendant of an edited element', () => {
@@ -53,6 +54,18 @@ describe('checkOpAgainstActive (blocked subtrees, mirrors applyOps)', () => {
     expect(checkOpAgainstActive(deleteBlock('r7'), [editText('r3')], doc).ok).toBe(true);
   });
 
+  it('rejects setAttr on a target inside an edited/deleted subtree', () => {
+    expect(checkOpAgainstActive(setAttr('r5'), [editText('r3')], doc).ok).toBe(false);
+    expect(checkOpAgainstActive(setAttr('r4'), [deleteBlock('r3')], doc).ok).toBe(false);
+    expect(checkOpAgainstActive(setAttr('r3'), [deleteBlock('r3')], doc).ok).toBe(false);
+  });
+
+  it('allows setAttr on unrelated elements and on an edited element itself', () => {
+    expect(checkOpAgainstActive(setAttr('r7'), [editText('r3')], doc).ok).toBe(true);
+    // editText replaces CHILDREN; the element itself stays addressable.
+    expect(checkOpAgainstActive(setAttr('r3'), [editText('r3')], doc).ok).toBe(true);
+  });
+
   it('lifts the block when the blocking op is no longer active (undo)', () => {
     const op = deleteBlock('r4');
     // Journal before undo: editText r3 is active → blocked.
@@ -67,7 +80,11 @@ describe('guardDocPush (full ops:push gate)', () => {
 
   it('rejects a push carrying another document id (stale doc view invoke)', () => {
     const res = guardDocPush('doc-OLD', raw, 'doc-NEW', doc, []);
-    expect(res).toEqual({ ok: false, error: expect.stringContaining('doc-OLD') });
+    expect(res).toEqual({
+      ok: false,
+      error: expect.stringContaining('doc-OLD'),
+      code: 'stale-doc',
+    });
     expect(guardDocPush(42, raw, 'doc-NEW', doc, []).ok).toBe(false);
   });
 
@@ -81,6 +98,39 @@ describe('guardDocPush (full ops:push gate)', () => {
       false,
     );
     expect(guardDocPush('d1', raw, 'd1', doc, [deleteBlock('r3')]).ok).toBe(false);
+  });
+
+  it('labels every rejection with a code (main picks the user notice by it)', () => {
+    expect(guardDocPush('doc-OLD', raw, 'doc-NEW', doc, [])).toMatchObject({
+      ok: false,
+      code: 'stale-doc',
+    });
+    expect(guardDocPush('d1', { type: 'editText', id: 'r999', html: '' }, 'd1', doc, [])).toMatchObject(
+      { ok: false, code: 'invalid' },
+    );
+    expect(guardDocPush('d1', raw, 'd1', doc, [deleteBlock('r3')])).toMatchObject({
+      ok: false,
+      code: 'blocked-subtree',
+    });
+    expect(
+      guardDocPush('d1', { type: 'setAttr', id: 'r8', name: 'src', value: 'a.png' }, 'd1', doc, [
+        deleteBlock('r2'),
+      ]),
+    ).toMatchObject({ ok: false, code: 'blocked-subtree' });
+  });
+
+  it('gates setAttr the same way: shape, blocked subtree, docId', () => {
+    const rawSet = { type: 'setAttr', id: 'r8', name: 'src', value: 'data:image/png;base64,AA' };
+    expect(guardDocPush('d1', rawSet, 'd1', doc, [])).toEqual({
+      ok: true,
+      op: { type: 'setAttr', id: 'r8', name: 'src', value: 'data:image/png;base64,AA' },
+    });
+    expect(guardDocPush('stale', rawSet, 'd1', doc, []).ok).toBe(false);
+    expect(guardDocPush('d1', { ...rawSet, name: 'onerror' }, 'd1', doc, []).ok).toBe(false);
+    // Non-<img> target dies in validateOp before the subtree check.
+    expect(guardDocPush('d1', { ...rawSet, id: 'r4' }, 'd1', doc, []).ok).toBe(false);
+    // Blocked subtree: the <img> is a body child, so delete the body itself.
+    expect(guardDocPush('d1', rawSet, 'd1', doc, [deleteBlock('r2')]).ok).toBe(false);
   });
 });
 

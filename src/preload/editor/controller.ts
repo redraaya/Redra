@@ -8,6 +8,9 @@ import type { EditSessionState, Normalize } from './session.js';
 import { LocalHistory } from './history.js';
 import { HANDLE_REACH, Overlay } from './overlay.js';
 import { startDrag } from './drag.js';
+import { toggleInlineTag } from './format.js';
+import { selectionContext } from './toolbar.js';
+import type { ToolbarAction } from './toolbar.js';
 
 /**
  * The editing layer living in the doc preload's isolated world (A1–A4).
@@ -68,7 +71,18 @@ export function createEditorController(
         },
       });
     },
+    onImageReplace: () => {
+      const img = overlay.currentImage;
+      if (!img || session || dragging) return;
+      void replaceImageViaPick(img);
+    },
+    onToolbar: (action, value) => handleToolbarAction(action, value),
   });
+
+  /** Last selection range shown in the toolbar — restored for link actions
+   *  (the link input legitimately steals focus and with it the selection). */
+  let lastSelectionRange: Range | null = null;
+  let toolbarUpdateQueued = false;
 
   // --- op transport ---------------------------------------------------------
 
@@ -78,10 +92,146 @@ export function createEditorController(
       // Main is the source of truth: the journal never recorded this op, so
       // the matching local entry (pushed just before this call) must go too —
       // revert the DOM via its stored inverse and drop it from the stack.
-      // User-visible: the action bounces back. Correct v1 behaviour.
+      // The action visibly bounces back; main's localized userMessage (when
+      // present — stale-doc rejections stay silent) becomes a shell toast so
+      // the bounce is never a mystery.
       console.error('[redra] ops:push rejected:', res.error, op);
       history.undoAndDiscard();
+      if (res.userMessage) bridge.notifyRejected(res.userMessage);
     }
+  }
+
+  // --- image replacement (v0.2.0) -------------------------------------------
+
+  /** The <img data-redra-id> for an event target, or null. */
+  function asReplaceableImage(el: Element): HTMLElement | null {
+    return el.tagName === 'IMG' && el.hasAttribute(REDRA_ID_ATTR) ? (el as HTMLElement) : null;
+  }
+
+  /**
+   * Apply a replacement value to the live img and record it everywhere:
+   * local inverse stack first, then ops:push (a rejected push rolls the DOM
+   * back via undoAndDiscard — same contract as every other op).
+   */
+  function applyImageValue(img: HTMLElement, id: string, value: string): void {
+    const prevValue = img.getAttribute('src');
+    img.setAttribute('src', value);
+    history.push({ kind: 'setAttr', el: img, name: 'src', prevValue, newValue: value });
+    void pushOp({ type: 'setAttr', id, name: 'src', value });
+  }
+
+  async function replaceImageViaPick(img: HTMLElement): Promise<void> {
+    const id = img.getAttribute(REDRA_ID_ATTR);
+    if (!id) return;
+    const res = await bridge.pickImage(id);
+    // Errors were already shown by main's dialog; canceled is just canceled.
+    if (!res.ok) return;
+    applyImageValue(img, id, res.value);
+  }
+
+  /** True when the drag carries OS files (not an in-page text/block drag). */
+  function isFileDrag(e: DragEvent): boolean {
+    const types = e.dataTransfer?.types;
+    return !!types && Array.from(types).includes('Files');
+  }
+
+  function onDragOver(e: DragEvent): void {
+    const target = asElement(e.target);
+    const img = target && asReplaceableImage(target);
+    if (!img || !isFileDrag(e)) return; // not ours — the shell handles .html drops
+    e.preventDefault(); // signals "drop allowed here"
+    e.stopImmediatePropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function onDrop(e: DragEvent): void {
+    const target = asElement(e.target);
+    const img = target && asReplaceableImage(target);
+    if (!img) return;
+    e.preventDefault(); // never let a file drop on an img navigate the view
+    e.stopImmediatePropagation();
+    const id = img.getAttribute(REDRA_ID_ATTR);
+    const file = e.dataTransfer?.files?.[0];
+    if (!id || !file) return;
+    let path = '';
+    try {
+      path = bridge.pathForFile(file);
+    } catch {
+      return; // synthetic File without a backing fs path
+    }
+    if (!path) return;
+    void bridge.replaceImageFromPath(id, path).then((res) => {
+      if (res.ok) applyImageValue(img, id, res.value);
+    });
+  }
+
+  // --- inline formatting toolbar (Feature 3) ---------------------------------
+
+  /**
+   * Recompute the toolbar for the current selection (rAF-throttled via
+   * queueToolbarUpdate). Visible only during a session with a non-collapsed
+   * selection fully inside the session element.
+   */
+  function updateToolbar(): void {
+    const ctx = session ? selectionContext(win, doc, session.el) : null;
+    if (!ctx) {
+      lastSelectionRange = null;
+      overlay.toolbar.hide();
+      return;
+    }
+    lastSelectionRange = ctx.range.cloneRange();
+    overlay.toolbar.show(ctx.rect, ctx.state);
+  }
+
+  function queueToolbarUpdate(): void {
+    if (toolbarUpdateQueued) return;
+    toolbarUpdateQueued = true;
+    win.requestAnimationFrame(() => {
+      toolbarUpdateQueued = false;
+      updateToolbar();
+    });
+  }
+
+  /** Put the saved selection back into the session element (link flows). */
+  function restoreSelection(): void {
+    const sel = win.getSelection?.();
+    if (!sel || !lastSelectionRange || !session) return;
+    session.el.focus({ preventScroll: true });
+    sel.removeAllRanges();
+    sel.addRange(lastSelectionRange);
+  }
+
+  function handleToolbarAction(action: ToolbarAction, value?: string): void {
+    if (!session) return;
+    switch (action) {
+      case 'bold':
+        doc.execCommand?.('bold');
+        break;
+      case 'italic':
+        doc.execCommand?.('italic');
+        break;
+      case 'code': {
+        // execCommand has no "code" — manual Range surgery (see format.ts).
+        const sel = win.getSelection?.();
+        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) break;
+        const range = sel.getRangeAt(0);
+        if (!session.el.contains(range.commonAncestorContainer)) break;
+        toggleInlineTag(range, 'code', session.el);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        break;
+      }
+      case 'link':
+        if (!value) break;
+        restoreSelection();
+        doc.execCommand?.('createLink', false, value);
+        break;
+      case 'unlink':
+        restoreSelection();
+        doc.execCommand?.('unlink');
+        break;
+    }
+    queueToolbarUpdate(); // reflect the new state on the buttons
   }
 
   // --- edit sessions (A1) ----------------------------------------------------
@@ -99,6 +249,8 @@ export function createEditorController(
     const s = session;
     if (!s) return;
     session = null; // cleared first: the blur this triggers must be a no-op
+    lastSelectionRange = null;
+    overlay.toolbar.hide();
     if (!commit) {
       revertSession(s);
       return;
@@ -179,6 +331,7 @@ export function createEditorController(
       hoverBlock = null;
     }
     overlay.hideHandle();
+    overlay.hideImageChip();
   }
 
   function setHover(block: HTMLElement | null): void {
@@ -234,6 +387,16 @@ export function createEditorController(
       return;
     }
 
+    // Click on an original <img>: the replace flow, never a text session.
+    const img = asReplaceableImage(target);
+    if (img) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (session) void endSession(true);
+      void replaceImageViaPick(img);
+      return;
+    }
+
     // Clicking anywhere else first commits the active session.
     if (session) void endSession(true);
 
@@ -247,7 +410,12 @@ export function createEditorController(
     if (session || dragging) return; // block UI is dormant during a session/drag
     const target = asElement(e.target);
     if (!target) return;
-    if (overlay.containsTarget(target)) return; // hovering the pill keeps it alive
+    if (overlay.containsTarget(target)) return; // hovering the pill/chip keeps it alive
+    // Replace affordance for original images: chip at the img's top-right.
+    // The chip overlaps the img rect, so there is no dead gap to cross.
+    const img = asReplaceableImage(target);
+    if (img) overlay.showImageChip(img);
+    else overlay.hideImageChip();
     let block = resolveBlock(target, win);
     // For a NESTED block the trip to the pill crosses its PARENT container,
     // which resolves as a block of its own — without this guard the pill
@@ -298,6 +466,8 @@ export function createEditorController(
   }
 
   function onKeyDown(e: KeyboardEvent): void {
+    // Keys typed into overlay chrome (the link input) are the toolbar's own.
+    if (overlay.containsTarget(e.target)) return;
     if (e.key !== 'Escape' || !session) return;
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -305,6 +475,8 @@ export function createEditorController(
   }
 
   function onFocusOut(e: FocusEvent): void {
+    // Focus moving INTO the overlay (link input) must not commit the session.
+    if (overlay.containsTarget(e.relatedTarget)) return;
     if (session && e.target === session.el) void endSession(true);
   }
 
@@ -314,6 +486,7 @@ export function createEditorController(
     win.requestAnimationFrame(() => {
       repositionQueued = false;
       overlay.reposition();
+      updateToolbar(); // the selection rect moved with the scroll
     });
   }
 
@@ -323,6 +496,11 @@ export function createEditorController(
     ['mouseout', onMouseOut as EventListener, true],
     ['keydown', onKeyDown as EventListener, true],
     ['focusout', onFocusOut as EventListener, true],
+    ['dragover', onDragOver as EventListener, true],
+    ['drop', onDrop as EventListener, true],
+    // selectionchange targets `document` and does not bubble — the capture
+    // phase still passes through `window`, so this fires.
+    ['selectionchange', queueToolbarUpdate as EventListener, true],
     ['scroll', queueReposition as EventListener, { capture: true, passive: true }],
     ['resize', queueReposition as EventListener, true],
   ];

@@ -17,6 +17,13 @@ function makeBridge() {
     undo: vi.fn(async () => ({ ok: true, dirty: false })),
     redo: vi.fn(async () => ({ ok: true, dirty: false })),
     openExternal: vi.fn(),
+    pickImage: vi.fn(async () => ({ ok: true as const, value: 'data:image/png;base64,AA' })),
+    replaceImageFromPath: vi.fn(async () => ({
+      ok: true as const,
+      value: 'data:image/png;base64,BB',
+    })),
+    pathForFile: vi.fn(() => '/tmp/dropped.png'),
+    notifyRejected: vi.fn(),
   } satisfies RedraDocBridge;
 }
 

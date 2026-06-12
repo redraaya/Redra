@@ -143,9 +143,25 @@ export type DeleteBlockOp = { type: 'deleteBlock'; id: string };
  * `beforeId`, or append to the end of the parent when `beforeId` is null.
  */
 export type MoveBlockOp = { type: 'moveBlock'; id: string; beforeId: string | null };
+/**
+ * Set/replace ONE attribute on element `id` (appended when absent).
+ * v1: image replacement — the only allowed name is 'src' (see
+ * SETATTR_ALLOWED_NAMES); applyOps rejects everything else, so the journal
+ * can never smuggle surprise attributes (onerror, style, …) into the file.
+ */
+export type SetAttrOp = { type: 'setAttr'; id: string; name: string; value: string };
 
 /** A recorded edit. Plain JSON data — safe to send over IPC and persist. */
-export type Op = EditTextOp | DeleteBlockOp | MoveBlockOp;
+export type Op = EditTextOp | DeleteBlockOp | MoveBlockOp | SetAttrOp;
+
+/**
+ * Engine-level whitelist of attribute names setAttr may touch. Deliberately
+ * tiny: widening it is an explicit engine change with its own review, never
+ * a journal payload away.
+ *
+ * @internal
+ */
+export const SETATTR_ALLOWED_NAMES: ReadonlySet<string> = new Set(['src']);
 
 /** Thrown when an operation cannot be applied to the document. */
 export class RedraOpError extends Error {
@@ -248,6 +264,19 @@ export function applyOps(doc: RedraDoc, ops: readonly Op[]): void {
           }
           parent.childNodes.splice(parent.childNodes.indexOf(before), 0, el);
         }
+        break;
+      }
+      case 'setAttr': {
+        if (!SETATTR_ALLOWED_NAMES.has(op.name)) {
+          throw new RedraOpError(
+            op,
+            `attribute "${op.name}" is not allowed (allowed: ${[...SETATTR_ALLOWED_NAMES].join(', ')})`,
+          );
+        }
+        const el = resolve(op, op.id, 'element');
+        const attr = el.attrs.find((a) => a.name === op.name);
+        if (attr) attr.value = op.value;
+        else el.attrs.push({ name: op.name, value: op.value });
         break;
       }
     }

@@ -160,6 +160,35 @@ body {
   color: var(--muted);
 }
 
+/* Transient rejected-op toast — same quiet pill recipe. It sits INSIDE the
+   44px strip: everything below is covered by the document WebContentsView,
+   which composites above this renderer, so a bottom-of-window toast would
+   be invisible exactly when it matters. */
+#notice-toast {
+  position: fixed;
+  top: 7px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(640px, calc(100vw - 200px));
+  padding: 4px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 3px 10px rgba(20, 18, 14, 0.1);
+  z-index: 20;
+  -webkit-app-region: no-drag;
+}
+
+#notice-toast[hidden] {
+  display: none;
+}
+
 .tb-btn {
   width: 30px;
   height: 30px;

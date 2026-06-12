@@ -1,8 +1,33 @@
-import { getElementById } from '../../engine/index.js';
+import { getElementById, SETATTR_ALLOWED_NAMES } from '../../engine/index.js';
 import type { Op, RedraDoc } from '../../engine/index.js';
 
 /** Upper bound for an editText payload — anything bigger is a bug or abuse. */
 export const MAX_EDIT_HTML_LENGTH = 2 * 1024 * 1024;
+
+/**
+ * Upper bound for a setAttr value. The user-facing cap is a 10 MB image
+ * FILE (enforced in main before the data: URI is built); base64 inflates
+ * those bytes by 4/3, so the wire-level cap is 14 MB — a 10 MB image fits,
+ * anything meaningfully bigger is a bug or abuse.
+ */
+export const MAX_SETATTR_VALUE_LENGTH = 14 * 1024 * 1024;
+
+/**
+ * True when a setAttr src value is allowed through: an inline image
+ * (`data:image/...`) or a relative path. Scheme parsing mirrors isSafeHref
+ * in the engine (tab/newline/CR stripped everywhere, leading C0/controls
+ * stripped, case-insensitive match) so `java\nscript:` cannot smuggle
+ * through. Absolute (`/x`), protocol-relative (`//host`), UNC (`\\srv`) and
+ * every explicit scheme (javascript:, file:, http:, …) are rejected: v1
+ * always embeds base64, relative paths are kept for hand-written journals.
+ */
+function isSafeImageSrc(value: string): boolean {
+  const cleaned = value.replace(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+/, '');
+  if (/^data:image\//i.test(cleaned)) return true;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(cleaned)) return false; // any other scheme, data:text included
+  if (cleaned.startsWith('/') || cleaned.startsWith('\\')) return false;
+  return true;
+}
 
 export type ValidateOpResult = { ok: true; op: Op } | { ok: false; error: string };
 
@@ -22,7 +47,12 @@ export function validateOp(raw: unknown, doc: RedraDoc): ValidateOpResult {
   if (!isRecord(raw)) return { ok: false, error: 'op is not an object' };
 
   const { type, id } = raw;
-  if (type !== 'editText' && type !== 'deleteBlock' && type !== 'moveBlock') {
+  if (
+    type !== 'editText' &&
+    type !== 'deleteBlock' &&
+    type !== 'moveBlock' &&
+    type !== 'setAttr'
+  ) {
     return { ok: false, error: `unknown op type: ${String(type)}` };
   }
   if (typeof id !== 'string' || id.length === 0) {
@@ -58,6 +88,30 @@ export function validateOp(raw: unknown, doc: RedraDoc): ValidateOpResult {
         }
       }
       return { ok: true, op: { type, id, beforeId } };
+    }
+    case 'setAttr': {
+      // Defense in depth: setAttr exists only for image replacement. Without
+      // the tag check a compromised preload could plant an executable src
+      // (data:image/svg+xml with onload, …) on an existing <iframe>/<embed>
+      // and the saved file would carry it. parse5 tagNames are lowercase.
+      if (el.tagName !== 'img') {
+        return { ok: false, error: 'setAttr target must be <img>' };
+      }
+      const name = raw['name'];
+      if (typeof name !== 'string' || !SETATTR_ALLOWED_NAMES.has(name)) {
+        return { ok: false, error: `setAttr name "${String(name)}" is not allowed` };
+      }
+      const value = raw['value'];
+      if (typeof value !== 'string') {
+        return { ok: false, error: 'setAttr value is not a string' };
+      }
+      if (value.length > MAX_SETATTR_VALUE_LENGTH) {
+        return { ok: false, error: `setAttr value exceeds ${MAX_SETATTR_VALUE_LENGTH} chars` };
+      }
+      if (!isSafeImageSrc(value)) {
+        return { ok: false, error: 'setAttr value must be a data:image/ URI or a relative path' };
+      }
+      return { ok: true, op: { type, id, name, value } };
     }
   }
 }

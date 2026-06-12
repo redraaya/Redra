@@ -12,6 +12,17 @@ disk. No code, no broken layout. Or export it to PDF.
 
 ![Redra features](docs/assets/features.png)
 
+**New in v0.2.0:**
+
+- **Image replacement** — click an image (or drop a file onto it) to swap it;
+  the picture is embedded into the document, which stays a single
+  self-contained file.
+- **Version history** — every session's first save keeps a timestamped copy;
+  File → Version History restores any of them (the current state is backed up
+  first, so a restore is always undoable).
+- **Inline formatting** — select text while editing and a small toolbar
+  appears: bold, italic, code, link.
+
 ## Why your file is safe
 
 Redra never rewrites your file — it edits it.
@@ -33,7 +44,8 @@ and fonts survive every edit.
 On open, the file is parsed (parse5) into a pristine reference tree; the
 window shows a stamped copy where every source element carries a stable id.
 User actions become journal operations (<code>editText</code>,
-<code>deleteBlock</code>, <code>moveBlock</code>) referencing those ids. The
+<code>deleteBlock</code>, <code>moveBlock</code>, <code>setAttr</code>)
+referencing those ids. The
 live DOM is never serialized — page scripts can mutate it freely without
 polluting saves. On ⌘S the journal is replayed onto a clone of the pristine
 tree; element attributes are restored from the source (provenance check), so

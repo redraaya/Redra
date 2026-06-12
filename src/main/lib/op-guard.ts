@@ -1,10 +1,13 @@
 import { getElementById, getElementId } from '../../engine/index.js';
 import { isTemplate, walkElements } from '../../engine/parse.js';
 import type { Element, Op, RedraDoc } from '../../engine/index.js';
+import type { OpRejectCode } from '../../shared/ipc.js';
 import { validateOp } from './validate-op.js';
 
 export type OpCheckResult = { ok: true } | { ok: false; error: string };
-export type GuardPushResult = { ok: true; op: Op } | { ok: false; error: string };
+export type GuardPushResult =
+  | { ok: true; op: Op }
+  | { ok: false; error: string; code: OpRejectCode };
 
 /**
  * Reject at PUSH time the ops that applyOps would reject at SAVE time —
@@ -78,11 +81,12 @@ export function guardDocPush(
     return {
       ok: false,
       error: `op for document "${String(payloadDocId)}" rejected: current document is "${currentDocId}"`,
+      code: 'stale-doc',
     };
   }
   const checked = validateOp(raw, doc);
-  if (!checked.ok) return checked;
+  if (!checked.ok) return { ok: false, error: checked.error, code: 'invalid' };
   const blocked = checkOpAgainstActive(checked.op, activeOps, doc);
-  if (!blocked.ok) return blocked;
+  if (!blocked.ok) return { ok: false, error: blocked.error, code: 'blocked-subtree' };
   return checked;
 }

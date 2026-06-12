@@ -4,6 +4,7 @@ import type {
   DocOpenedInfo,
   ExportResult,
   ModeState,
+  NoticeInfo,
   OpenResult,
   PerfEntry,
   RecentEntry,
@@ -34,6 +35,9 @@ const api: RedraShellApi = {
   },
   onModeChanged: (cb: (state: ModeState) => void) => {
     ipcRenderer.on('mode:changed', (_event, state: ModeState) => cb(state));
+  },
+  onNotice: (cb: (notice: NoticeInfo) => void) => {
+    ipcRenderer.on('notice:show', (_event, notice: NoticeInfo) => cb(notice));
   },
   onUpdateAvailable: (cb: (info: UpdateInfo) => void) => {
     ipcRenderer.on('update:available', (_event, info: UpdateInfo) => cb(info));
