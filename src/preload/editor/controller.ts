@@ -8,6 +8,9 @@ import type { EditSessionState, Normalize } from './session.js';
 import { LocalHistory } from './history.js';
 import { HANDLE_REACH, Overlay } from './overlay.js';
 import { startDrag } from './drag.js';
+import { toggleInlineTag } from './format.js';
+import { selectionContext } from './toolbar.js';
+import type { ToolbarAction } from './toolbar.js';
 
 /**
  * The editing layer living in the doc preload's isolated world (A1–A4).
@@ -73,7 +76,13 @@ export function createEditorController(
       if (!img || session || dragging) return;
       void replaceImageViaPick(img);
     },
+    onToolbar: (action, value) => handleToolbarAction(action, value),
   });
+
+  /** Last selection range shown in the toolbar — restored for link actions
+   *  (the link input legitimately steals focus and with it the selection). */
+  let lastSelectionRange: Range | null = null;
+  let toolbarUpdateQueued = false;
 
   // --- op transport ---------------------------------------------------------
 
@@ -153,6 +162,75 @@ export function createEditorController(
     });
   }
 
+  // --- inline formatting toolbar (Feature 3) ---------------------------------
+
+  /**
+   * Recompute the toolbar for the current selection (rAF-throttled via
+   * queueToolbarUpdate). Visible only during a session with a non-collapsed
+   * selection fully inside the session element.
+   */
+  function updateToolbar(): void {
+    const ctx = session ? selectionContext(win, doc, session.el) : null;
+    if (!ctx) {
+      lastSelectionRange = null;
+      overlay.toolbar.hide();
+      return;
+    }
+    lastSelectionRange = ctx.range.cloneRange();
+    overlay.toolbar.show(ctx.rect, ctx.state);
+  }
+
+  function queueToolbarUpdate(): void {
+    if (toolbarUpdateQueued) return;
+    toolbarUpdateQueued = true;
+    win.requestAnimationFrame(() => {
+      toolbarUpdateQueued = false;
+      updateToolbar();
+    });
+  }
+
+  /** Put the saved selection back into the session element (link flows). */
+  function restoreSelection(): void {
+    const sel = win.getSelection?.();
+    if (!sel || !lastSelectionRange || !session) return;
+    session.el.focus({ preventScroll: true });
+    sel.removeAllRanges();
+    sel.addRange(lastSelectionRange);
+  }
+
+  function handleToolbarAction(action: ToolbarAction, value?: string): void {
+    if (!session) return;
+    switch (action) {
+      case 'bold':
+        doc.execCommand?.('bold');
+        break;
+      case 'italic':
+        doc.execCommand?.('italic');
+        break;
+      case 'code': {
+        // execCommand has no "code" — manual Range surgery (see format.ts).
+        const sel = win.getSelection?.();
+        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) break;
+        const range = sel.getRangeAt(0);
+        if (!session.el.contains(range.commonAncestorContainer)) break;
+        toggleInlineTag(range, 'code', session.el);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        break;
+      }
+      case 'link':
+        if (!value) break;
+        restoreSelection();
+        doc.execCommand?.('createLink', false, value);
+        break;
+      case 'unlink':
+        restoreSelection();
+        doc.execCommand?.('unlink');
+        break;
+    }
+    queueToolbarUpdate(); // reflect the new state on the buttons
+  }
+
   // --- edit sessions (A1) ----------------------------------------------------
 
   function startSession(el: HTMLElement, clickX?: number, clickY?: number): void {
@@ -168,6 +246,8 @@ export function createEditorController(
     const s = session;
     if (!s) return;
     session = null; // cleared first: the blur this triggers must be a no-op
+    lastSelectionRange = null;
+    overlay.toolbar.hide();
     if (!commit) {
       revertSession(s);
       return;
@@ -383,6 +463,8 @@ export function createEditorController(
   }
 
   function onKeyDown(e: KeyboardEvent): void {
+    // Keys typed into overlay chrome (the link input) are the toolbar's own.
+    if (overlay.containsTarget(e.target)) return;
     if (e.key !== 'Escape' || !session) return;
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -390,6 +472,8 @@ export function createEditorController(
   }
 
   function onFocusOut(e: FocusEvent): void {
+    // Focus moving INTO the overlay (link input) must not commit the session.
+    if (overlay.containsTarget(e.relatedTarget)) return;
     if (session && e.target === session.el) void endSession(true);
   }
 
@@ -399,6 +483,7 @@ export function createEditorController(
     win.requestAnimationFrame(() => {
       repositionQueued = false;
       overlay.reposition();
+      updateToolbar(); // the selection rect moved with the scroll
     });
   }
 
@@ -410,6 +495,9 @@ export function createEditorController(
     ['focusout', onFocusOut as EventListener, true],
     ['dragover', onDragOver as EventListener, true],
     ['drop', onDrop as EventListener, true],
+    // selectionchange targets `document` and does not bubble — the capture
+    // phase still passes through `window`, so this fires.
+    ['selectionchange', queueToolbarUpdate as EventListener, true],
     ['scroll', queueReposition as EventListener, { capture: true, passive: true }],
     ['resize', queueReposition as EventListener, true],
   ];

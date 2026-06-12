@@ -1,5 +1,7 @@
 import { REDRA_ID_ATTR } from '../../engine/types.js';
 import { makeT, pickLang } from '../../shared/i18n.js';
+import { SelectionToolbar, TOOLBAR_CSS } from './toolbar.js';
+import type { ToolbarAction } from './toolbar.js';
 
 /**
  * Floating editor chrome: the block handle pill (⋮⋮ grip + trash), the drag
@@ -132,6 +134,8 @@ export interface OverlayCallbacks {
   onGripDown(event: PointerEvent): void;
   /** Click on the image-replace chip (the hovered <img> is currentImage). */
   onImageReplace(): void;
+  /** Inline-formatting toolbar button pressed (value = link href). */
+  onToolbar(action: ToolbarAction, value?: string): void;
 }
 
 export class Overlay {
@@ -140,6 +144,8 @@ export class Overlay {
   private readonly handle: HTMLElement;
   private readonly indicator: HTMLElement;
   private readonly imgChip: HTMLElement;
+  /** Inline-formatting toolbar (Feature 3) — shown/hidden by the controller. */
+  readonly toolbar: SelectionToolbar;
   private ghost: HTMLElement | null = null;
   private block: HTMLElement | null = null;
   private image: HTMLElement | null = null;
@@ -166,8 +172,12 @@ export class Overlay {
 
     const root = this.host.attachShadow({ mode: 'closed' });
     const style = doc.createElement('style');
-    style.textContent = SHADOW_CSS;
+    style.textContent = SHADOW_CSS + TOOLBAR_CSS;
     root.appendChild(style);
+
+    this.toolbar = new SelectionToolbar(doc, root, t, (action, value) =>
+      callbacks.onToolbar(action, value),
+    );
 
     this.handle = doc.createElement('div');
     this.handle.className = 'handle';

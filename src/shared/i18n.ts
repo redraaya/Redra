@@ -121,6 +121,12 @@ const STRINGS = {
   'overlay.drag': { ru: 'Перетащить блок', en: 'Drag block' },
   'overlay.delete': { ru: 'Удалить блок', en: 'Delete block' },
   'overlay.replaceImage': { ru: 'Заменить картинку', en: 'Replace image' },
+  'toolbar.bold': { ru: 'Жирный', en: 'Bold' },
+  'toolbar.italic': { ru: 'Курсив', en: 'Italic' },
+  'toolbar.code': { ru: 'Код', en: 'Code' },
+  'toolbar.link': { ru: 'Ссылка', en: 'Link' },
+  'toolbar.linkPlaceholder': { ru: 'Адрес ссылки', en: 'Link URL' },
+  'toolbar.removeLink': { ru: 'Убрать ссылку', en: 'Remove link' },
 } as const satisfies Record<string, { ru: string; en: string }>;
 
 export type StringKey = keyof typeof STRINGS;
