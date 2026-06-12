@@ -7,9 +7,10 @@ import {
 } from '../../src/main/lib/validate-op.js';
 import { senderMatches } from '../../src/main/lib/sender.js';
 
-// <html>=r0 <head>=r1 <body>=r2 <div>=r3 <p>=r4 <p>=r5 <span>=r6
+// <html>=r0 <head>=r1 <body>=r2 <div>=r3 <p>=r4 <p>=r5 <span>=r6 <img>=r7 <iframe>=r8 <embed>=r9
 const doc = parseDocument(
-  '<!doctype html><html><head></head><body><div><p>a</p><p>b<span>c</span></p></div></body></html>',
+  '<!doctype html><html><head></head><body><div><p>a</p><p>b<span>c</span></p></div>' +
+    '<img src="old.png"><iframe></iframe><embed></body></html>',
 );
 
 describe('validateOp', () => {
@@ -66,10 +67,10 @@ describe('validateOp', () => {
     expect(validateOp({ type: 'moveBlock', id: 'r4', beforeId: 'r6' }, doc).ok).toBe(false);
   });
 
-  it('accepts setAttr src with a data:image URI and returns a fresh sanitized op', () => {
+  it('accepts setAttr src on an <img> with a data:image URI and returns a fresh sanitized op', () => {
     const raw = {
       type: 'setAttr',
-      id: 'r4',
+      id: 'r7',
       name: 'src',
       value: 'data:image/png;base64,AAAA',
       junk: 1,
@@ -77,34 +78,47 @@ describe('validateOp', () => {
     const res = validateOp(raw, doc);
     expect(res).toEqual({
       ok: true,
-      op: { type: 'setAttr', id: 'r4', name: 'src', value: 'data:image/png;base64,AAAA' },
+      op: { type: 'setAttr', id: 'r7', name: 'src', value: 'data:image/png;base64,AAAA' },
     });
     if (res.ok) expect(res.op).not.toBe(raw);
   });
 
   it('accepts setAttr src with a relative path', () => {
-    expect(validateOp({ type: 'setAttr', id: 'r4', name: 'src', value: 'img/pic.png' }, doc).ok).toBe(
+    expect(validateOp({ type: 'setAttr', id: 'r7', name: 'src', value: 'img/pic.png' }, doc).ok).toBe(
       true,
     );
-    expect(validateOp({ type: 'setAttr', id: 'r4', name: 'src', value: './a.webp' }, doc).ok).toBe(
+    expect(validateOp({ type: 'setAttr', id: 'r7', name: 'src', value: './a.webp' }, doc).ok).toBe(
       true,
     );
+  });
+
+  it('rejects setAttr on anything but an <img> (iframe/embed/div/p)', () => {
+    // Defense in depth: a compromised preload must not be able to plant an
+    // executable src (data:image/svg+xml with onload, …) on iframe/embed.
+    for (const id of ['r8', 'r9', 'r3', 'r4']) {
+      const res = validateOp(
+        { type: 'setAttr', id, name: 'src', value: 'data:image/png;base64,AAAA' },
+        doc,
+      );
+      expect(res).toEqual({ ok: false, error: 'setAttr target must be <img>' });
+    }
   });
 
   it('rejects setAttr with any name except src', () => {
     for (const name of ['onerror', 'href', 'srcset', 'SRC', 'style', 7, null]) {
-      expect(validateOp({ type: 'setAttr', id: 'r4', name, value: 'x.png' }, doc).ok).toBe(false);
+      expect(validateOp({ type: 'setAttr', id: 'r7', name, value: 'x.png' }, doc).ok).toBe(false);
     }
   });
 
   it('rejects setAttr with a non-string or oversized value', () => {
-    expect(validateOp({ type: 'setAttr', id: 'r4', name: 'src', value: 5 }, doc).ok).toBe(false);
+    expect(validateOp({ type: 'setAttr', id: 'r7', name: 'src', value: 5 }, doc).ok).toBe(false);
     const huge = 'data:image/png;base64,' + 'A'.repeat(MAX_SETATTR_VALUE_LENGTH);
-    const res = validateOp({ type: 'setAttr', id: 'r4', name: 'src', value: huge }, doc);
+    const res = validateOp({ type: 'setAttr', id: 'r7', name: 'src', value: huge }, doc);
     expect(res).toEqual({ ok: false, error: expect.stringContaining('exceeds') });
   });
 
   it('rejects setAttr values with unsafe schemes or absolute paths', () => {
+    const target = 'r7'; // the <img> — value, not target, is under test here
     const bad = [
       'javascript:alert(1)',
       'JavaScript:alert(1)',
@@ -118,7 +132,7 @@ describe('validateOp', () => {
       'http://example.com/pic.png', // remote refs: not in the v1 contract
     ];
     for (const value of bad) {
-      expect(validateOp({ type: 'setAttr', id: 'r4', name: 'src', value }, doc).ok).toBe(false);
+      expect(validateOp({ type: 'setAttr', id: target, name: 'src', value }, doc).ok).toBe(false);
     }
   });
 

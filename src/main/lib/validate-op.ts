@@ -90,6 +90,13 @@ export function validateOp(raw: unknown, doc: RedraDoc): ValidateOpResult {
       return { ok: true, op: { type, id, beforeId } };
     }
     case 'setAttr': {
+      // Defense in depth: setAttr exists only for image replacement. Without
+      // the tag check a compromised preload could plant an executable src
+      // (data:image/svg+xml with onload, …) on an existing <iframe>/<embed>
+      // and the saved file would carry it. parse5 tagNames are lowercase.
+      if (el.tagName !== 'img') {
+        return { ok: false, error: 'setAttr target must be <img>' };
+      }
       const name = raw['name'];
       if (typeof name !== 'string' || !SETATTR_ALLOWED_NAMES.has(name)) {
         return { ok: false, error: `setAttr name "${String(name)}" is not allowed` };

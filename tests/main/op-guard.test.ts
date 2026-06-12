@@ -3,10 +3,10 @@ import { parseDocument } from '../../src/engine/index.js';
 import type { Op } from '../../src/engine/index.js';
 import { checkOpAgainstActive, guardDocPush } from '../../src/main/lib/op-guard.js';
 
-// <html>=r0 <head>=r1 <body>=r2 <section>=r3 <p>=r4 <span>=r5 <p>=r6 <div>=r7
+// <html>=r0 <head>=r1 <body>=r2 <section>=r3 <p>=r4 <span>=r5 <p>=r6 <div>=r7 <img>=r8
 const doc = parseDocument(
   '<!doctype html><html><head></head><body>' +
-    '<section><p>a<span>s</span></p><p>b</p></section><div>c</div>' +
+    '<section><p>a<span>s</span></p><p>b</p></section><div>c</div><img src="x.png">' +
     '</body></html>',
 );
 
@@ -97,14 +97,17 @@ describe('guardDocPush (full ops:push gate)', () => {
   });
 
   it('gates setAttr the same way: shape, blocked subtree, docId', () => {
-    const rawSet = { type: 'setAttr', id: 'r4', name: 'src', value: 'data:image/png;base64,AA' };
+    const rawSet = { type: 'setAttr', id: 'r8', name: 'src', value: 'data:image/png;base64,AA' };
     expect(guardDocPush('d1', rawSet, 'd1', doc, [])).toEqual({
       ok: true,
-      op: { type: 'setAttr', id: 'r4', name: 'src', value: 'data:image/png;base64,AA' },
+      op: { type: 'setAttr', id: 'r8', name: 'src', value: 'data:image/png;base64,AA' },
     });
-    expect(guardDocPush('d1', rawSet, 'd1', doc, [deleteBlock('r3')]).ok).toBe(false);
     expect(guardDocPush('stale', rawSet, 'd1', doc, []).ok).toBe(false);
     expect(guardDocPush('d1', { ...rawSet, name: 'onerror' }, 'd1', doc, []).ok).toBe(false);
+    // Non-<img> target dies in validateOp before the subtree check.
+    expect(guardDocPush('d1', { ...rawSet, id: 'r4' }, 'd1', doc, []).ok).toBe(false);
+    // Blocked subtree: the <img> is a body child, so delete the body itself.
+    expect(guardDocPush('d1', rawSet, 'd1', doc, [deleteBlock('r2')]).ok).toBe(false);
   });
 });
 

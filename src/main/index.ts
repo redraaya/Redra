@@ -21,6 +21,7 @@ import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
 import { guardDocPush } from './lib/op-guard.js';
+import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
 import { getElementById } from '../engine/index.js';
 import {
   buildImageDataUri,
@@ -131,10 +132,11 @@ async function rebuildAppMenu(): Promise<void> {
 }
 
 /**
- * «История версий» click: confirm, snapshot the current disk state (inside
- * openFromBackup), swap the document content to the chosen version and
- * reload the view. The file on disk is untouched until the user saves —
- * the shell shows the dirty dot, ⌘S writes the restored bytes.
+ * «История версий» click: guard unsaved edits, confirm, snapshot the current
+ * disk state (inside openFromBackup), swap the document content to the
+ * chosen version and reload the view. The file on disk is untouched until
+ * the user saves — the shell shows the dirty dot, ⌘S writes the restored
+ * bytes.
  */
 async function restoreVersion(v: VersionMenuItem): Promise<void> {
   const w = win;
@@ -142,6 +144,17 @@ async function restoreVersion(v: VersionMenuItem): Promise<void> {
   // Menu entries are ours, but never read a restore source from outside the store.
   if (!path.resolve(v.backupPath).startsWith(backupsDir + path.sep)) return;
   await commitActiveEdit();
+  // openFromBackup snapshots only the DISK bytes — unsaved journal ops would
+  // be discarded silently. Same three-button guard as window close / open-
+  // over-dirty; the restore confirm below still answers its own question.
+  const cur = docManager.currentDoc;
+  if (!cur) return;
+  const proceed = await resolveUnsavedBeforeRestore({
+    journalDirty: cur.journal.dirty,
+    askUnsavedChanges: () => saveFlow.askUnsavedChanges(w, path.basename(cur.filePath)),
+    save: () => saveFlow.doSave(false),
+  });
+  if (!proceed) return;
   const { response } = await dialog.showMessageBox(w, {
     type: 'warning',
     message: t('dialog.restore.message').replace('{date}', v.dateLabel),

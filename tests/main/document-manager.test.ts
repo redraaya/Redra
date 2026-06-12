@@ -176,6 +176,23 @@ describe('DocumentManager.openFromBackup (version history restore)', () => {
     expect(onDisk).not.toContain('версия 2');
   });
 
+  it('discards unsaved journal ops — callers must run the unsaved-changes guard first', async () => {
+    const { dm, backupPath } = await setupEditedDoc();
+    const cur = dm.currentDoc!;
+    cur.journal.push({ type: 'editText', id: pId(cur), html: 'несохранённая правка' });
+    expect(cur.journal.dirty).toBe(true);
+
+    const { opened } = await dm.openFromBackup(backupPath);
+
+    // Pinned semantics: the restored document starts with a FRESH journal.
+    // Unsaved ops do NOT survive — restoreVersion (index.ts) is responsible
+    // for asking «Сохранить / Не сохранять / Отмена» BEFORE calling this.
+    expect(opened.journal.ops).toHaveLength(0);
+    expect(opened.journal.dirty).toBe(false);
+    expect(opened.stampedHtml).toContain('версия 1');
+    expect(opened.stampedHtml).not.toContain('несохранённая правка');
+  });
+
   it('throws without an open document and leaves no state behind', async () => {
     const dm = new DocumentManager(new PerfLog());
     await expect(dm.openFromBackup('/nowhere.orig.html')).rejects.toThrow();
