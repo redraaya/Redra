@@ -17,6 +17,7 @@ const DROPPED = 'data:image/png;base64,BB';
 function makeBridge() {
   return {
     pushOp: vi.fn(async () => ({ ok: true as const })),
+    cloneBlock: vi.fn(async () => ({ ok: true as const, cloneId: 'c1', html: '<p data-redra-id="c1">x</p>' })),
     undo: vi.fn(async () => ({ ok: true, dirty: false })),
     redo: vi.fn(async () => ({ ok: true, dirty: false })),
     openExternal: vi.fn(),

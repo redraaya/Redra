@@ -21,6 +21,9 @@
  *
  * Channels (doc preload → main, invoke):
  *   'ops:push'          (docId: string, op: Op) → OpPushResult — validate + journal.push
+ *   'ops:cloneBlock'    (docId: string, targetId: string) → CloneBlockResult
+ *                        — mint cloneId + validate + push in ONE invoke (race-free);
+ *                          returns the STAMPED clone fragment for live insertion
  *   'ops:undo'          (docId: string) → OpUndoResult         — journal.undo
  *   'ops:redo'          (docId: string) → OpUndoResult         — journal.redo
  *   'link:openExternal' (url: string) → void                   — http/https only
@@ -150,6 +153,16 @@ export type OpPushResult =
 export type OpUndoResult = { ok: boolean; dirty: boolean };
 
 /**
+ * Result of 'ops:cloneBlock': main minted `cloneId`, journaled the op and
+ * rendered `html` — the clone subtree STAMPED with data-redra-id (cloneId /
+ * cloneId-n), so the preload can insert an immediately-editable live copy.
+ * Rejections mirror OpPushResult (codes from the same guard).
+ */
+export type CloneBlockResult =
+  | { ok: true; cloneId: string; html: string }
+  | { ok: false; error: string; code?: OpRejectCode; userMessage?: string };
+
+/**
  * Result of 'image:pick' / 'image:fromPath': the value to set as the img's
  * src — v1 ALWAYS a base64 data: URI, so single-file documents stay
  * self-contained. canceled = the user closed the picker; error has already
@@ -168,6 +181,8 @@ export type ImageValueResult =
  */
 export interface RedraDocBridge {
   pushOp(op: { type: string; id: string; [extra: string]: unknown }): Promise<OpPushResult>;
+  /** Duplicate block `id`: main mints the cloneId, journals the op and returns the stamped fragment. */
+  cloneBlock(id: string): Promise<CloneBlockResult>;
   undo(): Promise<OpUndoResult>;
   redo(): Promise<OpUndoResult>;
   openExternal(url: string): void;

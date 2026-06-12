@@ -4,8 +4,8 @@ import { SelectionToolbar, TOOLBAR_CSS } from './toolbar.js';
 import type { ToolbarAction } from './toolbar.js';
 
 /**
- * Floating editor chrome: the block handle pill (⋮⋮ grip + trash), the drag
- * drop-indicator line and the drag ghost.
+ * Floating editor chrome: the block handle pill (⋮⋮ grip + duplicate +
+ * trash), the drag drop-indicator line and the drag ghost.
  *
  * Handle + indicator live inside a CLOSED shadow root on a zero-size fixed
  * host appended to <html> — page CSS cannot restyle them, page scripts
@@ -55,14 +55,14 @@ const SHADOW_CSS = `
   padding: 3px 8px;
   touch-action: none;
 }
-.trash {
+.dup, .trash {
   all: initial;
   display: flex;
   cursor: pointer;
   color: inherit;
   padding: 2px;
 }
-.grip:hover, .trash:hover { color: #1c1b19; }
+.grip:hover, .dup:hover, .trash:hover { color: #1c1b19; }
 .indicator {
   position: fixed;
   display: none;
@@ -98,7 +98,7 @@ const SHADOW_CSS = `
     border-color: rgba(236, 234, 230, 0.12);
     color: #8f8c84;
   }
-  .grip:hover, .trash:hover { color: #eceae6; }
+  .grip:hover, .dup:hover, .trash:hover { color: #eceae6; }
   .indicator { background: rgba(236, 234, 230, 0.4); }
   .img-chip {
     background: rgba(35, 34, 32, 0.95);
@@ -122,6 +122,12 @@ const IMAGE_SVG =
   '<circle cx="8.5" cy="8.5" r="1.5"/>' +
   '<path d="M21 15l-5-5L5 21"/></svg>';
 
+const COPY_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect x="9" y="9" width="11" height="11" rx="2"/>' +
+  '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
 const TRASH_SVG =
   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
   'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -131,6 +137,8 @@ const TRASH_SVG =
 
 export interface OverlayCallbacks {
   onDelete(): void;
+  /** Click on the duplicate button (the hovered block is currentBlock). */
+  onDuplicate(): void;
   onGripDown(event: PointerEvent): void;
   /** Click on the image-replace chip (the hovered <img> is currentImage). */
   onImageReplace(): void;
@@ -189,12 +197,17 @@ export class Overlay {
       e.preventDefault();
       callbacks.onGripDown(e);
     });
+    const dup = doc.createElement('button');
+    dup.className = 'dup';
+    dup.setAttribute('title', t('overlay.duplicate'));
+    dup.innerHTML = COPY_SVG;
+    dup.addEventListener('click', () => callbacks.onDuplicate());
     const trash = doc.createElement('button');
     trash.className = 'trash';
     trash.setAttribute('title', t('overlay.delete'));
     trash.innerHTML = TRASH_SVG;
     trash.addEventListener('click', () => callbacks.onDelete());
-    this.handle.append(grip, trash);
+    this.handle.append(grip, dup, trash);
     root.appendChild(this.handle);
 
     this.indicator = doc.createElement('div');

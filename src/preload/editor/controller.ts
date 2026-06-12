@@ -49,6 +49,7 @@ export function createEditorController(
 
   const overlay = new Overlay(doc, {
     onDelete: () => deleteHoveredBlock(),
+    onDuplicate: () => duplicateHoveredBlock(),
     onGripDown: (e) => {
       const block = overlay.currentBlock;
       if (!block || dragging || session) return;
@@ -341,6 +342,36 @@ export function createEditorController(
     hoverBlock = block;
     block.classList.add('redra-hover');
     overlay.showHandle(block);
+  }
+
+  /**
+   * Block duplication: unlike other ops the journal push happens in MAIN
+   * inside the one 'ops:cloneBlock' invoke (it mints the cloneId), so the
+   * DOM changes only AFTER main confirmed — no rollback path needed. The
+   * returned fragment is STAMPED (cloneId / cloneId-n), so hover, edit,
+   * drag and delete work on the copy immediately.
+   */
+  function duplicateHoveredBlock(): void {
+    const block = overlay.currentBlock;
+    if (!block || session || dragging) return;
+    const id = block.getAttribute(REDRA_ID_ATTR);
+    const parent = block.parentNode as (Node & ParentNode) | null;
+    if (!id || !parent) return;
+    void bridge.cloneBlock(id).then((res) => {
+      if (!res.ok) {
+        console.error('[redra] ops:cloneBlock rejected:', res.error);
+        if (res.userMessage) bridge.notifyRejected(res.userMessage);
+        return;
+      }
+      // The block may have left the DOM while the invoke was in flight
+      // (page script). The journal keeps the op either way — recompute on
+      // save is the source of truth; the live copy is best-effort then.
+      if (!block.isConnected) return;
+      block.insertAdjacentHTML('afterend', res.html);
+      const inserted = block.nextElementSibling;
+      if (!inserted || inserted.getAttribute(REDRA_ID_ATTR) !== res.cloneId) return;
+      history.push({ kind: 'cloneBlock', node: inserted, parent, nextSibling: inserted.nextSibling });
+    });
   }
 
   function deleteHoveredBlock(): void {

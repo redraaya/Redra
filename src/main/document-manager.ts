@@ -35,6 +35,12 @@ export interface OpenedDoc {
    * dirty (see isDirty) even with a clean journal.
    */
   restoredFromBackup: boolean;
+  /**
+   * cloneBlock id mint: the next clone gets "c<counter+1>". Monotonic per
+   * document and NEVER decremented (an undone cloneBlock still sits in the
+   * journal's redo tail with its id — reuse would collide on redo).
+   */
+  cloneCounter: number;
 }
 
 export interface OpenTimings {
@@ -129,6 +135,7 @@ export class DocumentManager {
       lastKnownMtimeMs: stat.mtimeMs,
       backupDone: false,
       restoredFromBackup: false,
+      cloneCounter: 0,
     };
     this.current = opened; // replaces any previous doc; its docId now 404s
 
@@ -202,6 +209,7 @@ export class DocumentManager {
       lastKnownMtimeMs: st?.mtimeMs ?? cur.lastKnownMtimeMs,
       backupDone: true, // the pre-restore snapshot above IS this session's backup
       restoredFromBackup: true,
+      cloneCounter: 0, // fresh document state — fresh journal, fresh mint
     };
     this.current = opened;
     return { opened };

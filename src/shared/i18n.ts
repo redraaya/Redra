@@ -127,6 +127,7 @@ const STRINGS = {
 
   // --- doc editing overlay -----------------------------------------------------
   'overlay.drag': { ru: 'Перетащить блок', en: 'Drag block' },
+  'overlay.duplicate': { ru: 'Дублировать блок', en: 'Duplicate block' },
   'overlay.delete': { ru: 'Удалить блок', en: 'Delete block' },
   'overlay.replaceImage': { ru: 'Заменить картинку', en: 'Replace image' },
   'toolbar.bold': { ru: 'Жирный', en: 'Bold' },

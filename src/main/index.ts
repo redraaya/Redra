@@ -21,9 +21,9 @@ import { DEFAULT_SETTINGS } from './lib/settings.js';
 import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
-import { guardDocPush } from './lib/op-guard.js';
+import { guardCloneBlock, guardDocPush } from './lib/op-guard.js';
 import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
-import { getElementById } from '../engine/index.js';
+import { getElementById, renderCloneFragment } from '../engine/index.js';
 import {
   buildImageDataUri,
   IMAGE_EXTENSIONS,
@@ -35,6 +35,7 @@ import { ScreenshotHarness } from './screenshot.js';
 import { SmokeHarness } from './smoke.js';
 import { ContextRegistry, WindowContext, chooseOpenTarget } from './window-context.js';
 import type {
+  CloneBlockResult,
   ExportResult,
   ImageValueResult,
   OpPushResult,
@@ -854,6 +855,40 @@ function registerIpc(): void {
     cur.journal.push(checked.op);
     broadcastDirty(ctx);
     return { ok: true };
+  });
+  // Block duplication: mint + validate + render + push in ONE invoke, so the
+  // cloneId can never race another mint. The fragment is rendered BEFORE the
+  // journal push — if the engine rejects the op for any reason, nothing was
+  // recorded and the preload inserts nothing.
+  ipcMain.handle('ops:cloneBlock', (event, docId: unknown, targetId: unknown): CloneBlockResult => {
+    const ctx = docCtx(event);
+    if (!ctx) return { ok: false, error: 'bad sender' };
+    const cur = ctx.docManager.currentDoc;
+    if (!cur) return { ok: false, error: 'no document' };
+    const cloneId = `c${cur.cloneCounter + 1}`;
+    const checked = guardCloneBlock(docId, targetId, cloneId, cur.docId, cur.doc, cur.journal.ops);
+    if (!checked.ok) {
+      console.error('[ops] rejected cloneBlock:', checked.error);
+      const userMessage =
+        checked.code === 'blocked-subtree'
+          ? t('notice.blockedBlock')
+          : checked.code === 'invalid'
+            ? t('notice.opRejected')
+            : undefined;
+      return { ok: false, error: checked.error, code: checked.code, userMessage };
+    }
+    let html: string;
+    try {
+      html = renderCloneFragment(cur.doc, cur.journal.ops, checked.op.id, cloneId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[ops] cloneBlock render failed:', message);
+      return { ok: false, error: message, code: 'invalid', userMessage: t('notice.opRejected') };
+    }
+    cur.cloneCounter += 1;
+    cur.journal.push(checked.op);
+    broadcastDirty(ctx);
+    return { ok: true, cloneId, html };
   });
   // A rejected push the preload rolled back: forward main's own localized
   // text to the OWNING window's shell as a transient toast. Length-capped
