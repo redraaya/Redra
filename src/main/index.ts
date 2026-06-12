@@ -12,6 +12,7 @@ import { BackupStore } from './lib/backups.js';
 import { RecentsStore } from './recents-store.js';
 import { SettingsStore } from './settings-store.js';
 import { buildAppMenu, setBackupMenuChecked, setDocMenuEnabled } from './menu.js';
+import type { VersionMenuItem } from './menu.js';
 import { EDITOR_CSS } from './editor-css.js';
 import { PerfLog } from './lib/perf.js';
 import { senderMatches } from './lib/sender.js';
@@ -66,8 +67,12 @@ let recents: RecentsStore;
 let settingsStore: SettingsStore;
 /** Central session backups folder (userData/backups) — set in onReady. */
 let backupsDir = '';
-/** How many central backups survive a prune. */
-const BACKUPS_KEEP = 30;
+let backupStore: BackupStore | null = null;
+/** Prune budget: newest versions kept per document / store-wide. */
+const BACKUPS_KEEP_PER_FILE = 10;
+const BACKUPS_KEEP_GLOBAL = 100;
+/** «История версий» shows at most this many entries. */
+const VERSION_MENU_MAX = 10;
 
 let win: BrowserWindow | null = null;
 let docView: WebContentsView | null = null;
@@ -82,6 +87,83 @@ let quitRequested = false;
  * before any menu or dialog is built.
  */
 let t = makeT('en');
+
+/** Handlers shared by every (re)build of the application menu. */
+const menuHandlers = {
+  open: () => void openViaDialog(),
+  save: () => void saveFlow.doSave(false),
+  saveAs: () => void saveFlow.doSave(true),
+  exportPdf: () => void saveFlow.exportPdf(),
+  undo: () => docView?.webContents.send('edit:undo'),
+  redo: () => docView?.webContents.send('edit:redo'),
+  togglePreview: (checked: boolean) => setPreview(checked),
+  toggleBackup: (checked: boolean) => void applySettings({ backupOnFirstSave: checked }),
+  showBackups: () => void showBackupsFolder(),
+  restoreVersion: (v: VersionMenuItem) => void restoreVersion(v),
+};
+
+/**
+ * (Re)build the whole application menu. Electron menus are static once set,
+ * and «История версий» is data-driven — so the menu is rebuilt on startup,
+ * on every document open/close and after every backup write. Cheap: a
+ * readdir + template build.
+ */
+async function rebuildAppMenu(): Promise<void> {
+  const cur = docManager.currentDoc;
+  let versions: VersionMenuItem[] = [];
+  if (cur && backupStore) {
+    const entries = await backupStore.list(cur.filePath).catch(() => []);
+    const locale = pickLang(app.getLocale()) === 'ru' ? 'ru-RU' : 'en-US';
+    const fmt = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
+    versions = entries.slice(0, VERSION_MENU_MAX).map((e) => {
+      const dateLabel = fmt.format(new Date(e.savedAt));
+      const kb = Math.max(1, Math.round(e.size / 1024));
+      return { label: `${dateLabel} · ${kb} ${t('unit.kb')}`, dateLabel, backupPath: e.path };
+    });
+  }
+  buildAppMenu(menuHandlers, {
+    backupChecked: settingsStore.get().backupOnFirstSave,
+    t,
+    docOpen: !!cur,
+    previewChecked: previewOn,
+    versions,
+  });
+}
+
+/**
+ * «История версий» click: confirm, snapshot the current disk state (inside
+ * openFromBackup), swap the document content to the chosen version and
+ * reload the view. The file on disk is untouched until the user saves —
+ * the shell shows the dirty dot, ⌘S writes the restored bytes.
+ */
+async function restoreVersion(v: VersionMenuItem): Promise<void> {
+  const w = win;
+  if (!docManager.currentDoc || !w) return;
+  // Menu entries are ours, but never read a restore source from outside the store.
+  if (!path.resolve(v.backupPath).startsWith(backupsDir + path.sep)) return;
+  await commitActiveEdit();
+  const { response } = await dialog.showMessageBox(w, {
+    type: 'warning',
+    message: t('dialog.restore.message').replace('{date}', v.dateLabel),
+    detail: t('dialog.restore.detail'),
+    buttons: [t('dialog.restore.confirm'), t('dialog.cancel')],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (response !== 0) return;
+  try {
+    const { opened } = await docManager.openFromBackup(v.backupPath);
+    const view = ensureDocView();
+    await view.webContents.loadURL(`redra://doc/${opened.docId}/`);
+    setPreview(false); // restored documents open in live editing, like any open
+    broadcastDirty();
+    void rebuildAppMenu(); // the pre-restore snapshot just added a version
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[restore] failed:', message);
+    dialog.showErrorBox(t('error.restoreTitle'), message);
+  }
+}
 
 // Save / export / close-guard flows live in save-flow.ts; index only wires.
 const saveFlow = createSaveFlow({
@@ -136,27 +218,18 @@ async function onReady(): Promise<void> {
 
   // Central backups instead of .bak files next to the user's documents.
   // Existing .bak files are the user's property — never touched or removed.
+  // Timestamped since v0.2.0: each write is a new version (Date.now() is
+  // passed HERE — BackupStore itself never reads the clock).
   backupsDir = path.join(app.getPath('userData'), 'backups');
   const store = new BackupStore(backupsDir);
+  backupStore = store;
   docManager.setBackupWriter(async (filePath, bytes) => {
-    await store.backupFor(filePath, bytes);
-    await store.prune(BACKUPS_KEEP);
+    await store.backupFor(filePath, bytes, Date.now());
+    await store.prune(BACKUPS_KEEP_PER_FILE, BACKUPS_KEEP_GLOBAL);
+    void rebuildAppMenu(); // a new version just appeared in «История версий»
   });
 
-  buildAppMenu(
-    {
-      open: () => void openViaDialog(),
-      save: () => void saveFlow.doSave(false),
-      saveAs: () => void saveFlow.doSave(true),
-      exportPdf: () => void saveFlow.exportPdf(),
-      undo: () => docView?.webContents.send('edit:undo'),
-      redo: () => docView?.webContents.send('edit:redo'),
-      togglePreview: (checked) => setPreview(checked),
-      toggleBackup: (checked) => void applySettings({ backupOnFirstSave: checked }),
-      showBackups: () => void showBackupsFolder(),
-    },
-    { backupChecked: settingsStore.get().backupOnFirstSave, t },
-  );
+  await rebuildAppMenu();
   registerIpc();
   createWindow(readyAt);
   scheduleUpdateCheck();
@@ -247,6 +320,7 @@ function createWindow(readyAt: number): void {
     docManager.close();
     setDocMenuEnabled(false);
     setPreview(false);
+    void rebuildAppMenu(); // version submenu empties with the document
   });
 
   if (process.env['ELECTRON_RENDERER_URL']) {
@@ -445,8 +519,8 @@ function commitActiveEdit(): Promise<void> {
 }
 
 function broadcastDirty(): void {
-  const cur = docManager.currentDoc;
-  win?.webContents.send('doc:dirtyChanged', { dirty: cur ? cur.journal.dirty : false });
+  // isDirty covers both journal ops and a restored-but-unsaved backup.
+  win?.webContents.send('doc:dirtyChanged', { dirty: docManager.isDirty() });
 }
 
 // --- open flow ---------------------------------------------------------------
@@ -462,7 +536,7 @@ async function openDocument(filePath: string): Promise<OpenResult> {
     // In-flight typed text counts as unsaved — commit it into the journal first.
     await commitActiveEdit();
     const cur = docManager.currentDoc;
-    if (cur && cur.journal.dirty) {
+    if (cur && docManager.isDirty()) {
       const choice = await saveFlow.askUnsavedChanges(win, path.basename(cur.filePath));
       if (choice === 'cancel') return { ok: false, canceled: true };
       if (choice === 'save') {
@@ -488,9 +562,10 @@ async function openDocument(filePath: string): Promise<OpenResult> {
     win?.setTitle(`${name} — Redra`);
     setDocMenuEnabled(true);
     win?.webContents.send('doc:opened', { path: opened.filePath, name });
-    win?.webContents.send('doc:dirtyChanged', { dirty: opened.journal.dirty });
+    win?.webContents.send('doc:dirtyChanged', { dirty: docManager.isDirty() });
     // A fresh document always starts in live editing, never in «Просмотр».
     setPreview(false);
+    void rebuildAppMenu(); // «История версий» entries for THIS file
 
     app.addRecentDocument(opened.filePath);
     await recents.add(opened.filePath);

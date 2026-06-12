@@ -69,7 +69,8 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     try {
       await deps.commitActiveEdit();
       const cur = docManager.currentDoc;
-      if (!cur || !cur.journal.dirty) {
+      // isDirty: journal ops OR a restored-but-unsaved backup version.
+      if (!cur || !docManager.isDirty()) {
         destroyed = true;
         return;
       }
@@ -149,7 +150,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
       if (w && !w.isDestroyed()) {
         const name = path.basename(saved.path);
         w.setTitle(`${name} — Redra`);
-        w.webContents.send('doc:dirtyChanged', { dirty: cur.journal.dirty });
+        w.webContents.send('doc:dirtyChanged', { dirty: docManager.isDirty() });
       }
     } else if (!saved.canceled) {
       // Generic failure (apply/serialize/write) — must never be silent.

@@ -28,6 +28,13 @@ export interface OpenedDoc {
   lastKnownMtimeMs: number;
   /** True once the session backup has been written (or is not needed). */
   backupDone: boolean;
+  /**
+   * True after openFromBackup until the first successful save: disk holds a
+   * NEWER state than originalBytes, so an ops-free save must still WRITE
+   * (the skip-write shortcut is gated on this), and the document counts as
+   * dirty (see isDirty) even with a clean journal.
+   */
+  restoredFromBackup: boolean;
 }
 
 export interface OpenTimings {
@@ -60,6 +67,17 @@ export class DocumentManager {
 
   get currentDoc(): OpenedDoc | null {
     return this.current;
+  }
+
+  /**
+   * The single source of "unsaved changes": ops in the journal OR a restored
+   * backup that has not been written to disk yet. The shell dirty dot, the
+   * close guard and the open-over-dirty guard all ask HERE — the journal
+   * itself stays purely ops-based.
+   */
+  isDirty(): boolean {
+    const cur = this.current;
+    return !!cur && (cur.journal.dirty || cur.restoredFromBackup);
   }
 
   setBackupEnabled(on: boolean): void {
@@ -108,6 +126,7 @@ export class DocumentManager {
       stampedHtml,
       lastKnownMtimeMs: stat.mtimeMs,
       backupDone: false,
+      restoredFromBackup: false,
     };
     this.current = opened; // replaces any previous doc; its docId now 404s
 
@@ -124,6 +143,57 @@ export class DocumentManager {
   /** Drop the current document (single-window v1: it dies with its window). */
   close(): void {
     this.current = null;
+  }
+
+  /**
+   * Version-history restore: re-open the CURRENT document from a backup
+   * file. The document path does NOT change — only its content is replaced
+   * by the backup bytes; the next ⌘S writes them to the original path.
+   *
+   * Restore flow, in order:
+   *  1. read the backup bytes (a missing/corrupt backup aborts before
+   *     anything else happens);
+   *  2. snapshot the CURRENT disk bytes into the backup store — the restore
+   *     itself must be undoable (this intentionally ignores the
+   *     backupOnFirstSave setting: restoring is exactly the moment backups
+   *     exist for, and the feature only runs when the store is wired);
+   *  3. re-stat the file so the later save does not false-conflict;
+   *  4. swap in the parsed document with restoredFromBackup set (dirty until
+   *     saved; ops-free save WRITES instead of skipping).
+   */
+  async openFromBackup(backupPath: string): Promise<{ opened: OpenedDoc }> {
+    const cur = this.current;
+    if (!cur) throw new Error('Документ не открыт');
+    const filePath = cur.filePath;
+
+    const originalBytes = await fs.readFile(backupPath);
+
+    const diskBytes = await fs.readFile(filePath).catch(() => null);
+    if (diskBytes && this.backupWriter) {
+      await this.backupWriter(filePath, diskBytes);
+    }
+    const st = await fs.stat(filePath).catch(() => null);
+
+    const { text, encoding, hadBom } = decodeHtml(originalBytes);
+    const doc = parseDocument(text);
+    const stampedHtml = serializeForView(doc);
+
+    const opened: OpenedDoc = {
+      docId: randomUUID(),
+      filePath,
+      dir: cur.dir,
+      doc,
+      journal: new Journal(),
+      originalBytes,
+      encoding,
+      hadBom,
+      stampedHtml,
+      lastKnownMtimeMs: st?.mtimeMs ?? cur.lastKnownMtimeMs,
+      backupDone: true, // the pre-restore snapshot above IS this session's backup
+      restoredFromBackup: true,
+    };
+    this.current = opened;
+    return { opened };
   }
 
   /** Lookup for the redra:// protocol handler. Unknown/stale docId → undefined → 404. */
@@ -152,8 +222,9 @@ export class DocumentManager {
     // Save (not Save As) with no ops onto the same file AND a clean journal:
     // disk already holds originalBytes — skip the write. A dirty journal with
     // no ops (edit → save → undo-all) means disk holds the EDITED bytes, so
-    // we must fall through and write originalBytes back.
-    if (asPath === undefined && ops.length === 0 && !cur.journal.dirty) {
+    // we must fall through and write originalBytes back. Same for a restored
+    // backup: disk holds the PRE-restore bytes until this write happens.
+    if (asPath === undefined && ops.length === 0 && !cur.journal.dirty && !cur.restoredFromBackup) {
       this.perf.record('save-skipped-noop', performance.now() - t0);
       return { ok: true, path: targetPath, skipped: true };
     }
@@ -205,6 +276,7 @@ export class DocumentManager {
         cur.backupDone = true; // we just wrote this file ourselves; no original to back up
       }
       cur.journal.markSaved();
+      cur.restoredFromBackup = false; // the restored state is on disk now
       this.perf.record('save', performance.now() - t0, { bytes: bytes.length });
       return { ok: true, path: targetPath };
     } catch (err) {

@@ -34,6 +34,8 @@ const STRINGS = {
   'menu.exportPdf': { ru: 'Экспорт в PDF…', en: 'Export to PDF…' },
   'menu.backup': { ru: 'Создавать резервную копию', en: 'Keep a backup of the original' },
   'menu.showBackups': { ru: 'Показать резервные копии', en: 'Show backups' },
+  'menu.versionHistory': { ru: 'История версий', en: 'Version History' },
+  'menu.noVersions': { ru: 'Нет сохранённых версий', en: 'No saved versions' },
   'menu.edit': { ru: 'Правка', en: 'Edit' },
   'menu.undo': { ru: 'Отменить', en: 'Undo' },
   'menu.redo': { ru: 'Повторить', en: 'Redo' },
@@ -62,6 +64,17 @@ const STRINGS = {
     en: 'Overwrite it with the version from Redra? The external changes will be lost.',
   },
   'dialog.conflict.overwrite': { ru: 'Перезаписать', en: 'Overwrite' },
+  'dialog.restore.message': {
+    ru: 'Восстановить версию от {date}?',
+    en: 'Restore the version from {date}?',
+  },
+  'dialog.restore.detail': {
+    ru: 'Текущее состояние файла будет сохранено в резервные копии.',
+    en: 'The current state of the file will be backed up first.',
+  },
+  'dialog.restore.confirm': { ru: 'Восстановить', en: 'Restore' },
+  'error.restoreTitle': { ru: 'Не удалось восстановить версию', en: 'Can’t restore version' },
+  'unit.kb': { ru: 'КБ', en: 'KB' },
   'error.noDocument': { ru: 'Документ не открыт', en: 'No document is open' },
   'error.keepsChanging': {
     ru: 'Файл на диске продолжает меняться — сохранение прервано',

@@ -17,6 +17,18 @@ export interface MenuHandlers {
   toggleBackup(checked: boolean): void;
   /** «Show backups» — opens the central backups folder. */
   showBackups(): void;
+  /** «История версий» item clicked — confirm + restore flow lives in main. */
+  restoreVersion(version: VersionMenuItem): void;
+}
+
+/** One entry of the «История версий» submenu (built by main from BackupStore.list). */
+export interface VersionMenuItem {
+  /** `<date time> · <size KB>`, locale-formatted. */
+  label: string;
+  /** Locale-formatted date for the confirm dialog («Восстановить версию от …?»). */
+  dateLabel: string;
+  /** Absolute path of the backup file. */
+  backupPath: string;
 }
 
 export interface MenuOptions {
@@ -24,14 +36,28 @@ export interface MenuOptions {
   backupChecked: boolean;
   /** Localized labels (RU when the system is Russian, EN otherwise). */
   t: Translate;
+  /** A document is open: doc-only items start enabled. */
+  docOpen?: boolean;
+  /** Current «Просмотр» state for the View checkbox. */
+  previewChecked?: boolean;
+  /** «История версий» entries for the current document, newest first (≤10). */
+  versions?: VersionMenuItem[];
 }
 
 /** Menu items that only make sense with a document open (start disabled). */
-const DOC_ITEM_IDS = ['file-save', 'file-save-as', 'file-export-pdf', 'view-preview'] as const;
+const DOC_ITEM_IDS = [
+  'file-save',
+  'file-save-as',
+  'file-export-pdf',
+  'file-version-history',
+  'view-preview',
+] as const;
 
 export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void {
   const isMac = process.platform === 'darwin';
   const { t } = options;
+  const docOpen = options.docOpen ?? false;
+  const versions = options.versions ?? [];
   const template: MenuItemConstructorOptions[] = [];
 
   if (isMac) {
@@ -61,24 +87,37 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
       id: 'file-save',
       label: t('menu.save'),
       accelerator: 'CmdOrCtrl+S',
-      enabled: false,
+      enabled: docOpen,
       click: () => handlers.save(),
     },
     {
       id: 'file-save-as',
       label: t('menu.saveAs'),
       accelerator: 'CmdOrCtrl+Shift+S',
-      enabled: false,
+      enabled: docOpen,
       click: () => handlers.saveAs(),
     },
     {
       id: 'file-export-pdf',
       label: t('menu.exportPdf'),
       accelerator: 'CmdOrCtrl+Shift+E',
-      enabled: false,
+      enabled: docOpen,
       click: () => handlers.exportPdf(),
     },
     { type: 'separator' },
+    {
+      id: 'file-version-history',
+      label: t('menu.versionHistory'),
+      enabled: docOpen,
+      submenu: versions.length
+        ? versions.map(
+            (v): MenuItemConstructorOptions => ({
+              label: v.label,
+              click: () => handlers.restoreVersion(v),
+            }),
+          )
+        : [{ label: t('menu.noVersions'), enabled: false }],
+    },
     {
       id: 'file-backup',
       label: t('menu.backup'),
@@ -120,8 +159,8 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
         id: 'view-preview',
         label: t('menu.preview'),
         type: 'checkbox',
-        checked: false,
-        enabled: false,
+        checked: options.previewChecked ?? false,
+        enabled: docOpen,
         accelerator: 'CmdOrCtrl+E',
         click: (item) => handlers.togglePreview(item.checked),
       },
