@@ -89,7 +89,7 @@ export class DocumentManager {
   }
 
   /**
-   * Conflict resolution «Перезаписать»: adopt the on-disk mtime as ours so the
+   * Conflict resolution "Overwrite": adopt the on-disk mtime as ours so the
    * next save() passes the guard and overwrites the external change.
    */
   async acceptExternalMtime(): Promise<void> {

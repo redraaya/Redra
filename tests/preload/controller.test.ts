@@ -8,7 +8,7 @@ import type { RedraDocBridge } from '../../src/shared/ipc.js';
 /**
  * Controller-level tests (A1/A4): the capture-phase listeners on `window`
  * must suppress page handlers while editing is armed, hand the page back in
- * «Просмотр», and route clicks/keys into sessions and bridge calls.
+ * Preview, and route clicks/keys into sessions and bridge calls.
  */
 
 function makeBridge() {
@@ -81,7 +81,7 @@ describe('editor controller (jsdom)', () => {
     expect(document.querySelector('[contenteditable]')).toBeNull(); // and no session
   });
 
-  it('hands clicks back to the page in «Просмотр» (setEditing(false))', () => {
+  it('hands clicks back to the page in Preview (setEditing(false))', () => {
     controller.setEditing(false);
     const e = click(el('a'));
     expect(pageClicks).toHaveBeenCalledTimes(1);

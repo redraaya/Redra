@@ -20,12 +20,12 @@ export interface SaveFlowDeps {
   commitActiveEdit(): Promise<void>;
   /** before-quit was seen: a confirmed close should resume the aborted Cmd+Q. */
   isQuitRequested(): boolean;
-  /** Cmd+Q was aborted by «Отмена» — forget it. */
+  /** Cmd+Q was aborted by "Cancel" — forget it. */
   clearQuitRequested(): void;
 }
 
 export interface SaveFlow {
-  /** True while the «Сохранить изменения?» close flow runs (re-entrancy guard). */
+  /** True while the "Save changes?" close flow runs (re-entrancy guard). */
   isCloseFlowActive(): boolean;
   askUnsavedChanges(w: BrowserWindow, name: string): Promise<'save' | 'discard' | 'cancel'>;
   handleCloseRequest(w: BrowserWindow): Promise<void>;
@@ -37,11 +37,11 @@ export interface SaveFlow {
 export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
   const { docManager, perf } = deps;
 
-  /** Close-guard re-entrancy: true while the «Сохранить изменения?» flow runs. */
+  /** Close-guard re-entrancy: true while the "Save changes?" flow runs. */
   let closeFlowActive = false;
 
   /**
-   * Shared «Сохранить изменения в «<name>»?» dialog (close guard + open-over-
+   * Shared "Save changes to <name>?" dialog (close guard + open-over-
    * dirty). Returns the user's choice; the caller decides what «save» means.
    */
   async function askUnsavedChanges(
@@ -60,7 +60,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
 
   /**
    * Close guard: commit any in-flight edit, then — if the journal is dirty —
-   * ask «Сохранить / Не сохранять / Отмена». destroy() bypasses 'close', so the
+   * ask "Save / Don't Save / Cancel". destroy() bypasses 'close', so the
    * approved path cannot re-trigger the guard.
    */
   async function handleCloseRequest(w: BrowserWindow): Promise<void> {
@@ -77,7 +77,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
       const choice = await askUnsavedChanges(w, path.basename(cur.filePath));
       if (choice === 'save') {
         const saved = await doSave(false, { fromCloseFlow: true });
-        // Save failed or was canceled (e.g. conflict «Отмена») — keep the window.
+        // Save failed or was canceled (e.g. conflict "Cancel") — keep the window.
         destroyed = saved.ok;
       } else if (choice === 'discard') {
         destroyed = true;
@@ -86,7 +86,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
       closeFlowActive = false;
       if (destroyed && !w.isDestroyed()) w.destroy();
       if (destroyed && deps.isQuitRequested()) app.quit();
-      if (!destroyed) deps.clearQuitRequested(); // Cmd+Q was aborted by «Отмена»
+      if (!destroyed) deps.clearQuitRequested(); // Cmd+Q was aborted by "Cancel"
     }
   }
 
@@ -115,12 +115,12 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     let saved = await docManager.save(asPath);
 
     // mtime conflict: someone changed the file on disk since open/last save.
-    // Loop: the file can change AGAIN between «Перезаписать» and the retry —
+    // Loop: the file can change AGAIN between "Overwrite" and the retry —
     // re-ask instead of falling into the generic-error branch. Bounded so a
     // pathological writer cannot trap the user in the dialog forever.
     for (let attempt = 0; !saved.ok && saved.conflict && attempt < 3; attempt++) {
-      // Окно перечитывается после каждого await: захваченная до save() ссылка
-      // могла указывать на уже уничтоженное окно («Object has been destroyed»).
+      // Re-read the window after every await: a reference captured before save()
+      // could point to an already-destroyed window ("Object has been destroyed").
       const w = deps.getWin();
       if (deps.smoke || !w || w.isDestroyed()) {
         console.warn('[save] conflict: file on disk changed since open/last save');
@@ -144,8 +144,8 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     }
 
     if (saved.ok) {
-      // Окно перечитывается после await save(): окно могло быть закрыто за
-      // время записи — setTitle по мёртвой ссылке кидает исключение.
+      // Re-read the window after await save(): it could have been closed while
+      // the write was in flight — setTitle on a dead reference throws.
       const w = deps.getWin();
       if (w && !w.isDestroyed()) {
         const name = path.basename(saved.path);
@@ -163,7 +163,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
   }
 
   /**
-   * «Экспорт в PDF…»: commit the active edit (so no editing chrome prints),
+   * "Export to PDF…": commit the active edit (so no editing chrome prints),
    * ask where, print the live doc view, write atomically, reveal in Finder.
    */
   async function exportPdf(): Promise<ExportResult> {
@@ -174,8 +174,8 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
 
     await deps.commitActiveEdit();
 
-    // Окно перечитывается после await: захваченная до него ссылка могла
-    // указывать на уже уничтоженное окно («Object has been destroyed»).
+    // Re-read the window after the await: a reference captured before it could
+    // point to an already-destroyed window ("Object has been destroyed").
     const win = deps.getWin();
     if (!win || win.isDestroyed()) return { ok: false, canceled: true };
 
@@ -186,7 +186,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     });
     if (result.canceled || !result.filePath) return { ok: false, canceled: true };
 
-    // То же для doc-view: пока висел диалог, документ могли закрыть.
+    // Same for the doc view: the document could have been closed while the dialog was up.
     const view = deps.getDocView();
     if (!view || view.webContents.isDestroyed()) return { ok: false, canceled: true };
 

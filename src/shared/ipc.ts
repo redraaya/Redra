@@ -14,7 +14,7 @@
  *   'perf:get'         () → PerfEntry[]
  *
  * Channels (shell renderer → main, send):
- *   'mode:toggle'      ()  — flip «Просмотр»; main stays the single source of truth
+ *   'mode:toggle'      ()  — flip Preview; main stays the single source of truth
  *   'update:open'      (url: string)     — open the release page; main re-checks
  *                                          the url is https://github.com/redraaya/Redra/…
  *   'update:dismiss'   (version: string) — persist dismissedUpdateVersion
@@ -45,7 +45,7 @@
  * Events (main → shell renderer):
  *   'doc:opened'        DocOpenedInfo
  *   'doc:dirtyChanged'  DirtyState   — pushed on every ops push/undo/redo/save
- *   'mode:changed'      ModeState    — «Просмотр» toggled
+ *   'mode:changed'      ModeState    — Preview toggled
  *   'notice:show'       NoticeInfo   — transient quiet toast (rejected-op notice)
  *   'update:available'  UpdateInfo   — once per launch, ~8s after ready, only
  *                                      when a newer non-dismissed release exists
@@ -89,10 +89,10 @@ export interface Settings {
   dismissedUpdateVersion?: string;
 }
 
-/** One row of the start screen's «Недавние» list (display-ready, built in main). */
+/** One row of the start screen's "Recent" list (display-ready, built in main). */
 export interface RecentEntry {
   path: string;
-  /** Basename, e.g. «отчёт.html». */
+  /** Basename, e.g. "report.html". */
   name: string;
   /** Containing directory with the home dir shortened to «~». */
   dir: string;
@@ -110,7 +110,7 @@ export interface DirtyState {
 }
 
 export interface ModeState {
-  /** True when the live editing layer is armed (default); false = «Просмотр». */
+  /** True when the live editing layer is armed (default); false = Preview. */
   editing: boolean;
 }
 
@@ -190,7 +190,7 @@ export interface RedraShellApi {
   save(): Promise<SaveResult>;
   saveAs(): Promise<SaveResult>;
   exportPdf(): Promise<ExportResult>;
-  /** Flip «Просмотр» — main owns the state and answers with 'mode:changed'. */
+  /** Flip Preview — main owns the state and answers with 'mode:changed'. */
   togglePreview(): void;
   getRecents(): Promise<RecentEntry[]>;
   getSettings(): Promise<Settings>;

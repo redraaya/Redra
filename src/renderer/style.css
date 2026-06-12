@@ -107,7 +107,7 @@ body {
 }
 
 /* Update pill — same quiet recipe as #mode-pill; the only colour is a 5px
-   accent dot. No animation, no bright plates — тихо. */
+   accent dot. No animation, no bright plates — quiet. */
 #update-pill {
   margin-right: 6px;
   padding: 2px 10px;

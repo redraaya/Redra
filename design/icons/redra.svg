@@ -1,5 +1,5 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <!-- Redra app icon — concept Б («r + каретка»), approved in Stage 0.
+  <!-- Redra app icon — concept B ("r + caret"), approved in Stage 0.
        Apple Big Sur icon grid: the visible squircle is 824×824 centered on
        a TRANSPARENT 1024 canvas (margins 100px each side), corner radius
        ≈185 for that size — so the Dock size matches neighboring apps.

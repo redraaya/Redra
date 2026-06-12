@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.1",
   "productName": "Redra",
-  "description": "Открой HTML. Кликни. Пиши. — визуальный редактор HTML-файлов. Open an HTML file, click, write — a visual HTML editor.",
+  "description": "Open HTML. Click. Write. — a visual editor for HTML files.",
   "author": "redraaya",
   "license": "MIT",
   "homepage": "https://github.com/redraaya/Redra",

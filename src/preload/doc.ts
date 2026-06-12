@@ -43,7 +43,7 @@ const bridge: RedraDocBridge = {
 };
 
 let controller: EditorController | null = null;
-// Live editing is the DEFAULT («тыц и пиши»); main may flip it before the
+// Live editing is the DEFAULT ("click and write"); main may flip it before the
 // DOM is ready, so the latest requested state is kept until boot.
 let wantEditing = true;
 

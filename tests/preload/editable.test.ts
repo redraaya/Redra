@@ -62,8 +62,8 @@ describe('resolveEditable', () => {
   });
 });
 
-describe('resolveEditable: div-карточки с голым текстом (полевой баг)', () => {
-  it('клик в голый текст карточки (target = div) редактирует div', () => {
+describe('resolveEditable: div cards with bare text (field bug)', () => {
+  it('a click into the card\'s bare text (target = div) edits the div', () => {
     mount(
       '<div data-redra-id="r5"><b data-redra-id="r6">Зачем этот документ.</b>' +
         ' Разобраться, как устроен документ.</div>',
@@ -71,7 +71,7 @@ describe('resolveEditable: div-карточки с голым текстом (п
     expect(resolveEditable(q('div'))).toBe(q('div'));
   });
 
-  it('клик в <b> внутри текстонесущего div редактирует весь div (одна сессия на карточку)', () => {
+  it('a click into a <b> inside a text-bearing div edits the whole div (one session per card)', () => {
     mount(
       '<div data-redra-id="r5"><b data-redra-id="r6">Ключевое наблюдение.</b>' +
         ' M-Video строит себя сразу в трёх слоях.</div>',
@@ -79,21 +79,21 @@ describe('resolveEditable: div-карточки с голым текстом (п
     expect(resolveEditable(q('b'))).toBe(q('div'));
   });
 
-  it('div-обёртка без прямого текста остаётся нередактируемой', () => {
+  it('a wrapper div with no direct text stays non-editable', () => {
     mount(
       '<div data-redra-id="r5"><p data-redra-id="r6">x</p><p data-redra-id="r7">y</p></div>',
     );
     expect(resolveEditable(q('div'))).toBeNull();
   });
 
-  it('пробельный текст между дочерними блоками не делает обёртку редактируемой', () => {
+  it('whitespace-only text between child blocks does not make the wrapper editable', () => {
     mount(
       '<div data-redra-id="r5">\n  <p data-redra-id="r6">x</p>\n  <p data-redra-id="r7">y</p>\n</div>',
     );
     expect(resolveEditable(q('div'))).toBeNull();
   });
 
-  it('нештампованный div с текстом (создан скриптом) → null', () => {
+  it('an unstamped div with text (script-created) → null', () => {
     mount('<div><b data-redra-id="r6">з</b> текст</div>');
     expect(resolveEditable(q('div'))).toBeNull();
   });

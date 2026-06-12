@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Redra — дизайн-концепция (Этап 0)</title>
+<title>Redra — design concept (Stage 0)</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css">
 <style>
   :root{
@@ -82,23 +82,23 @@
 </head>
 <body>
 
-<div class="section-label">1 · Иконка — три концепта</div>
+<div class="section-label">1 · Icon — three concepts</div>
 <div class="icons">
   <div class="icon-card">
     <div class="tile tile-a"><div class="ln" style="width:56px"></div><div class="caret-row"><div class="ln" style="width:26px"></div><div class="bar"></div><div class="ln" style="width:16px"></div></div><div class="ln" style="width:44px"></div></div>
-    <span>А · «Каретка в тексте»</span>
+    <span>A · “Caret in the text”</span>
   </div>
   <div class="icon-card">
     <div class="tile tile-b"><span class="r">r</span><span class="bar"></span></div>
-    <span>Б · «r + каретка»</span>
+    <span>B · “r + caret”</span>
   </div>
   <div class="icon-card">
     <div class="tile tile-c"><span>‹</span><span class="bar"></span><span>›</span></div>
-    <span>В · «Из кода — в текст»</span>
+    <span>C · “From code — to text”</span>
   </div>
 </div>
 
-<div class="section-label">2 · Стартовый экран</div>
+<div class="section-label">2 · Start screen</div>
 <div class="win" id="w1">
   <div class="titlebar">
     <div class="lights"><span style="background:#FF5F57"></span><span style="background:#FEBC2E"></span><span style="background:#28C840"></span></div>
@@ -108,41 +108,44 @@
   <div class="start">
     <div class="glyph"><div class="bar"></div></div>
     <div class="wordmark">Redra</div>
-    <div class="tagline">Откройте HTML-файл. Кликните в текст. Пишите.</div>
-    <div class="drop">Перетащите файл сюда — или <b>⌘O</b></div>
+    <div class="tagline">Open an HTML file. Click into the text. Write.</div>
+    <div class="drop">Drop a file here — or <b>⌘O</b></div>
     <div class="recent">
-      <div class="recent-label">Недавние</div>
-      <div class="row"><i class="ti ti-file-text"></i><div><div>квартальный-отчёт.html</div><div class="path">~/Documents/Analytics</div></div><div class="when">2 мин назад</div></div>
-      <div class="row"><i class="ti ti-file-text"></i><div><div>презентация-стратегия.html</div><div class="path">~/Downloads</div></div><div class="when">вчера</div></div>
-      <div class="row"><i class="ti ti-file-text"></i><div><div>market-research.html</div><div class="path">~/Desktop</div></div><div class="when">3 дня назад</div></div>
+      <div class="recent-label">Recent</div>
+      <div class="row"><i class="ti ti-file-text"></i><div><div>квартальный-отчёт.html</div><div class="path">~/Documents/Analytics</div></div><div class="when">2 min ago</div></div>
+      <div class="row"><i class="ti ti-file-text"></i><div><div>презентация-стратегия.html</div><div class="path">~/Downloads</div></div><div class="when">yesterday</div></div>
+      <div class="row"><i class="ti ti-file-text"></i><div><div>market-research.html</div><div class="path">~/Desktop</div></div><div class="when">3 days ago</div></div>
     </div>
   </div>
 </div>
 
-<div class="section-label">3 · Окно документа: живое редактирование</div>
+<div class="section-label">3 · Document window: live editing</div>
 <div class="win" id="w2">
   <div class="titlebar">
     <div class="lights"><span style="background:#FF5F57"></span><span style="background:#FEBC2E"></span><span style="background:#28C840"></span></div>
-    <div class="doc-title">квартальный-отчёт.html <span class="unsaved" title="есть несохранённые изменения"></span></div>
+    <div class="doc-title">квартальный-отчёт.html <span class="unsaved" title="unsaved changes"></span></div>
     <div class="tb-actions">
-      <div class="tb-btn" title="Режим просмотра (⌘E)"><i class="ti ti-eye"></i></div>
-      <div class="tb-btn" title="Экспорт в PDF"><i class="ti ti-file-download"></i></div>
-      <div class="tb-btn" title="Сохранить (⌘S)"><i class="ti ti-device-floppy"></i></div>
+      <div class="tb-btn" title="Preview mode (⌘E)"><i class="ti ti-eye"></i></div>
+      <div class="tb-btn" title="Export to PDF"><i class="ti ti-file-download"></i></div>
+      <div class="tb-btn" title="Save (⌘S)"><i class="ti ti-device-floppy"></i></div>
     </div>
   </div>
+  <!-- The sample document below (quarterly report, file names in the Recent list)
+       is intentionally in Russian: the mockup depicts a user’s Russian document
+       opened in Redra — realistic content, not UI text. -->
   <div class="canvas">
     <div class="page">
       <h1>Анализ продаж — Q2 2026</h1>
       <p class="lead">Сводный отчёт по динамике выручки, каналам привлечения и юнит-экономике за второй квартал.</p>
       <div class="stats blk-hover">
         <div class="handle"><span class="grip">⋮⋮</span><i class="ti ti-trash"></i></div>
-        <div class="note" style="left:-46px; top:-26px">ручка блока — drag / удалить</div>
+        <div class="note" style="left:-46px; top:-26px">block handle — drag / delete</div>
         <div class="stat"><div class="v">₽ 48,2 млн</div><div class="l">Выручка</div></div>
         <div class="stat"><div class="v">+23%</div><div class="l">К прошлому кварталу</div></div>
         <div class="stat"><div class="v">1 840</div><div class="l">Новых клиентов</div></div>
       </div>
       <p style="margin-top:18px" class="editing">Рост выручки обеспечен в первую очередь партнёрским каналом: его доля достигла 34%<span class="caret"></span> против 21% кварталом ранее.
-        <span class="note" style="right:-8px; top:-24px">клик — и сразу каретка</span>
+        <span class="note" style="right:-8px; top:-24px">click — and the caret is right there</span>
       </p>
       <table>
         <tr><th>Канал</th><th>Выручка</th><th>Доля</th></tr>
@@ -154,7 +157,7 @@
   </div>
 </div>
 
-<div class="section-label" style="display:flex; gap:14px; align-items:center">4 · Тёмная тема оболочки <button onclick="document.querySelectorAll('.win').forEach(w=>w.classList.toggle('dark'))" style="font:inherit; font-size:12px; padding:5px 12px; border-radius:7px; border:1px solid #CCC9C0; background:#fff; cursor:pointer">Переключить темы на макетах выше</button></div>
+<div class="section-label" style="display:flex; gap:14px; align-items:center">4 · Dark shell theme <button onclick="document.querySelectorAll('.win').forEach(w=>w.classList.toggle('dark'))" style="font:inherit; font-size:12px; padding:5px 12px; border-radius:7px; border:1px solid #CCC9C0; background:#fff; cursor:pointer">Toggle the theme on the mockups above</button></div>
 
 </body>
 </html>

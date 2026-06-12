@@ -1,20 +1,20 @@
-# Сборка дистрибутива Redra: DMG для Apple Silicon (arm64), без подписи.
-# Подпись/нотаризация сознательно отключены (identity: null) — первый запуск
-# скачанного приложения разблокируется через Системные настройки →
-# Конфиденциальность и безопасность → «Открыть всё равно» (см. README).
+# Redra distribution build: a DMG for Apple Silicon (arm64), unsigned.
+# Signing/notarization is deliberately off (identity: null) — the first launch
+# of the downloaded app is unblocked via System Settings →
+# Privacy & Security → "Open Anyway" (see README).
 appId: app.redra.redra
 productName: Redra
 
-# Автообновлений нет — без publish: null electron-builder кладёт в пакет
-# app-update.yml / latest-mac.yml, которые ничем не используются.
+# No auto-updates — without publish: null electron-builder puts
+# app-update.yml / latest-mac.yml into the package, and nothing uses them.
 publish: null
 
 directories:
   output: dist
   buildResources: build
 
-# electron-vite кладёт скомпилированный код в out/; production-зависимостей
-# нет (движок собран в бандл), так что node_modules в пакет не попадает.
+# electron-vite puts the compiled code into out/; there are no production
+# dependencies (the engine is bundled), so node_modules never enters the package.
 files:
   - out/**
   - package.json
@@ -31,9 +31,9 @@ mac:
   identity: null
   artifactName: Redra-${version}-arm64.dmg
   extendInfo:
-    # Ассоциация с HTML как РЕДАКТОР (роль Editor): Redra появляется в
-    # Finder → «Открыть в…» для .html/.htm, не перехватывая их по умолчанию
-    # (LSHandlerRank: Alternate — браузер остаётся обработчиком по умолчанию).
+    # HTML association as an EDITOR (Editor role): Redra appears in
+    # Finder → "Open With…" for .html/.htm without hijacking them by default
+    # (LSHandlerRank: Alternate — the browser stays the default handler).
     CFBundleDocumentTypes:
       - CFBundleTypeName: HTML document
         CFBundleTypeRole: Editor
@@ -45,7 +45,7 @@ mac:
           - htm
 
 dmg:
-  # Классическая раскладка: приложение слева, симлинк на /Applications справа.
+  # Classic layout: the app on the left, a symlink to /Applications on the right.
   contents:
     - x: 130
       y: 220

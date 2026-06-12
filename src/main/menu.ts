@@ -17,15 +17,15 @@ export interface MenuHandlers {
   toggleBackup(checked: boolean): void;
   /** «Show backups» — opens the central backups folder. */
   showBackups(): void;
-  /** «История версий» item clicked — confirm + restore flow lives in main. */
+  /** "Version History" item clicked — confirm + restore flow lives in main. */
   restoreVersion(version: VersionMenuItem): void;
 }
 
-/** One entry of the «История версий» submenu (built by main from BackupStore.list). */
+/** One entry of the "Version History" submenu (built by main from BackupStore.list). */
 export interface VersionMenuItem {
   /** `<date time> · <size KB>`, locale-formatted. */
   label: string;
-  /** Locale-formatted date for the confirm dialog («Восстановить версию от …?»). */
+  /** Locale-formatted date for the confirm dialog ("Restore the version from …?"). */
   dateLabel: string;
   /** Absolute path of the backup file. */
   backupPath: string;
@@ -38,9 +38,9 @@ export interface MenuOptions {
   t: Translate;
   /** A document is open: doc-only items start enabled. */
   docOpen?: boolean;
-  /** Current «Просмотр» state for the View checkbox. */
+  /** Current Preview state for the View checkbox. */
   previewChecked?: boolean;
-  /** «История версий» entries for the current document, newest first (≤10). */
+  /** "Version History" entries for the current document, newest first (≤10). */
   versions?: VersionMenuItem[];
 }
 

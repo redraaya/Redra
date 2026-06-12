@@ -72,13 +72,13 @@ let backupStore: BackupStore | null = null;
 /** Prune budget: newest versions kept per document / store-wide. */
 const BACKUPS_KEEP_PER_FILE = 10;
 const BACKUPS_KEEP_GLOBAL = 100;
-/** «История версий» shows at most this many entries. */
+/** "Version History" shows at most this many entries. */
 const VERSION_MENU_MAX = 10;
 
 let win: BrowserWindow | null = null;
 let docView: WebContentsView | null = null;
 let pendingOpenPath: string | null = cliFile ? path.resolve(cliFile) : null;
-/** «Просмотр» state — single source of truth lives here in main. */
+/** Preview state — single source of truth lives here in main. */
 let previewOn = false;
 /** Set on before-quit so a confirmed close can resume the aborted Cmd+Q. */
 let quitRequested = false;
@@ -105,7 +105,7 @@ const menuHandlers = {
 
 /**
  * (Re)build the whole application menu. Electron menus are static once set,
- * and «История версий» is data-driven — so the menu is rebuilt on startup,
+ * and "Version History" is data-driven — so the menu is rebuilt on startup,
  * on every document open/close and after every backup write. Cheap: a
  * readdir + template build.
  */
@@ -132,7 +132,7 @@ async function rebuildAppMenu(): Promise<void> {
 }
 
 /**
- * «История версий» click: guard unsaved edits, confirm, snapshot the current
+ * "Version History" click: guard unsaved edits, confirm, snapshot the current
  * disk state (inside openFromBackup), swap the document content to the
  * chosen version and reload the view. The file on disk is untouched until
  * the user saves — the shell shows the dirty dot, ⌘S writes the restored
@@ -248,7 +248,7 @@ async function onReady(): Promise<void> {
   docManager.setBackupWriter(async (filePath, bytes) => {
     await store.backupFor(filePath, bytes, Date.now());
     await store.prune(BACKUPS_KEEP_PER_FILE, BACKUPS_KEEP_GLOBAL);
-    void rebuildAppMenu(); // a new version just appeared in «История версий»
+    void rebuildAppMenu(); // a new version just appeared in "Version History"
   });
 
   await rebuildAppMenu();
@@ -446,7 +446,7 @@ async function applySettings(patch: unknown): Promise<Settings> {
   return next;
 }
 
-/** «Показать резервные копии»: open userData/backups in Finder (create it first so openPath never fails on a fresh install). */
+/** "Show backups": open userData/backups in Finder (create it first so openPath never fails on a fresh install). */
 async function showBackupsFolder(): Promise<void> {
   if (!backupsDir) return;
   await mkdir(backupsDir, { recursive: true }).catch(() => undefined);
@@ -493,7 +493,7 @@ function isRedraReleaseUrl(url: string): boolean {
 
 // --- editing mode + edit-session commit -------------------------------------
 
-/** Toggle «Просмотр»: editing layer off in the doc view, pill in the shell. */
+/** Toggle Preview: editing layer off in the doc view, pill in the shell. */
 function setPreview(on: boolean): void {
   // Switching INTO preview must not lose an in-flight edit session.
   const finish = (): void => {
@@ -585,9 +585,9 @@ async function openDocument(filePath: string): Promise<OpenResult> {
     setDocMenuEnabled(true);
     win?.webContents.send('doc:opened', { path: opened.filePath, name });
     win?.webContents.send('doc:dirtyChanged', { dirty: docManager.isDirty() });
-    // A fresh document always starts in live editing, never in «Просмотр».
+    // A fresh document always starts in live editing, never in Preview.
     setPreview(false);
-    void rebuildAppMenu(); // «История версий» entries for THIS file
+    void rebuildAppMenu(); // "Version History" entries for THIS file
 
     app.addRecentDocument(opened.filePath);
     await recents.add(opened.filePath);

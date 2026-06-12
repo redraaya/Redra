@@ -1,4 +1,4 @@
-# Релиз по тегу v*: тесты → typecheck → DMG arm64 → GitHub Release.
+# Release on a v* tag: tests → typecheck → arm64 DMG → GitHub Release.
 name: Release
 
 on:
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    # macos-14 — раннер на Apple Silicon: DMG собирается на целевой архитектуре.
+    # macos-14 is an Apple Silicon runner: the DMG is built on the target architecture.
     runs-on: macos-14
     timeout-minutes: 30
     steps:
@@ -22,8 +22,8 @@ jobs:
           node-version: 22
           cache: npm
 
-      # Тег релиза обязан совпадать с версией в package.json — иначе DMG
-      # с «чужой» версией уедет в релиз под неверным тегом.
+      # The release tag must match the version in package.json — otherwise a DMG
+      # with a "foreign" version would ship in a release under the wrong tag.
       - name: Verify tag matches package.json version
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
 
@@ -38,7 +38,7 @@ jobs:
       - name: Build DMG (unsigned)
         run: npm run dist
         env:
-          # Подписи нет намеренно — не дать electron-builder искать сертификаты.
+          # Deliberately unsigned — stop electron-builder from looking for certificates.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: Publish release

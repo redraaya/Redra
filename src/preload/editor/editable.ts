@@ -1,7 +1,7 @@
 import { REDRA_ID_ATTR } from '../../engine/types.js';
 
 /**
- * Block-level elements that host an edit session directly («тыц и пиши»).
+ * Block-level elements that host an edit session directly ("click and write").
  */
 export const BLOCK_EDITABLE_TAGS = new Set([
   'p',
@@ -56,7 +56,7 @@ export const INLINE_EDITABLE_TAGS = new Set([
  * - walk ancestors-or-self: the first BLOCK_EDITABLE tag (with id) wins;
  * - inline carriers accumulate on the way up; hitting a non-editable
  *   boundary: if the boundary element is a stamped TEXT-BEARING container
- *   (direct non-whitespace text child — the «div-карточка» pattern of
+ *   (direct non-whitespace text child — the "div card" pattern of
  *   AI-generated reports, field bug #1), the container itself is edited;
  *   otherwise fall back to the outermost stamped inline carrier seen, or null.
  */

@@ -4,7 +4,7 @@ import type { EditTextOp } from '../../engine/ops.js';
 
 export type Normalize = (html: string) => string;
 
-/** An active «тыц и пиши» edit session on one element. */
+/** An active "click and write" edit session on one element. */
 export interface EditSessionState {
   el: HTMLElement;
   id: string;

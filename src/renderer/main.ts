@@ -118,7 +118,7 @@ redra.onDirtyChanged((state) => {
 });
 
 redra.onModeChanged((state) => {
-  // The pill is visible while «Просмотр» (preview) is on, i.e. editing off.
+  // The pill is visible while Preview is on, i.e. editing off.
   modePill.hidden = state.editing;
   btnPreview.classList.toggle('active', !state.editing);
 });

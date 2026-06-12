@@ -15,7 +15,7 @@ import { writeAtomic } from './atomic-write.js';
  * list() reports them with the file mtime as savedAt — no migration.
  */
 
-/** One stored version of a document, for the «История версий» menu. */
+/** One stored version of a document, for the "Version History" menu. */
 export interface BackupEntry {
   /** Absolute path of the backup file inside the store. */
   path: string;

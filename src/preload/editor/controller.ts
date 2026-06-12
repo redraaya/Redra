@@ -21,7 +21,7 @@ import type { ToolbarAction } from './toolbar.js';
  * (stopImmediatePropagation) while editing is on.
  */
 export interface EditorController {
-  /** Arm (editing) / disarm («Просмотр») the layer. Idempotent. */
+  /** Arm (editing) / disarm (Preview) the layer. Idempotent. */
   setEditing(editing: boolean): void;
   /** Commit any active edit session and push its op. For 'edit:commit'. */
   commitActive(): Promise<void>;

@@ -1,7 +1,7 @@
-# CI на каждый push/PR в main. macos-14 (Apple Silicon) — сознательно:
-# smoke-прогон запускает настоящее окно Electron, macOS-раннеры это умеют
-# без виртуального дисплея. Если smoke окажется нестабильным на раннерах,
-# его можно вынести в отдельный необязательный job — пока не потребовалось.
+# CI on every push/PR to main. macos-14 (Apple Silicon) is deliberate:
+# the smoke run opens a real Electron window, and macOS runners can do that
+# without a virtual display. If smoke ever turns flaky on the runners, it can
+# be moved into a separate optional job — hasn't been needed so far.
 name: CI
 
 on:

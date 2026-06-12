@@ -180,7 +180,7 @@ describe('image replacement (jsdom)', () => {
     expect(bridge.pushOp).not.toHaveBeenCalled();
   });
 
-  it('«Просмотр» (setEditing(false)) hands img clicks back to the page', async () => {
+  it('Preview (setEditing(false)) hands img clicks back to the page', async () => {
     controller.setEditing(false);
     click(img());
     await flush();

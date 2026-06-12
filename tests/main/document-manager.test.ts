@@ -91,11 +91,11 @@ describe('DocumentManager mtime conflict', () => {
 
     const res = await dm.save();
     expect(res).toMatchObject({ ok: false, conflict: true });
-    // «Отмена» path: nothing was written, the journal stays dirty.
+    // "Cancel" path: nothing was written, the journal stays dirty.
     expect(opened.journal.dirty).toBe(true);
     expect(await readFile(file, 'utf8')).toContain('<p>hi</p>');
 
-    // «Перезаписать» path: adopt the external mtime, then the save goes through.
+    // "Overwrite" path: adopt the external mtime, then the save goes through.
     await dm.acceptExternalMtime();
     const retried = await dm.save();
     expect(retried.ok).toBe(true);
@@ -186,7 +186,7 @@ describe('DocumentManager.openFromBackup (version history restore)', () => {
 
     // Pinned semantics: the restored document starts with a FRESH journal.
     // Unsaved ops do NOT survive — restoreVersion (index.ts) is responsible
-    // for asking «Сохранить / Не сохранять / Отмена» BEFORE calling this.
+    // for asking "Save / Don't Save / Cancel" BEFORE calling this.
     expect(opened.journal.ops).toHaveLength(0);
     expect(opened.journal.dirty).toBe(false);
     expect(opened.stampedHtml).toContain('версия 1');
