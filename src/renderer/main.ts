@@ -4,6 +4,7 @@ import { formatRelativeTime } from '../shared/relative-time';
 import { FindBarModel } from './find-bar';
 import type { FindCommand } from './find-bar';
 import { createNoticeToast } from './notice';
+import { createTooltip } from './tooltip';
 import './style.css';
 
 declare global {
@@ -55,11 +56,14 @@ const lang = pickLang(navigator.language);
 const t = makeT(lang);
 
 modePill.textContent = t('shell.modePreview');
-btnPreview.title = t('shell.previewTooltip');
+// Titlebar .tb-btn icons carry their localized tooltip in data-tip (consumed
+// by the custom tooltip module); the native `title` is deliberately absent so
+// there is no slow double tooltip.
+btnPreview.dataset['tip'] = t('shell.previewTooltip');
 btnUndo.dataset['tip'] = t('shell.undoTooltip');
 btnRedo.dataset['tip'] = t('shell.redoTooltip');
-btnOpen.title = t('shell.openTooltip');
-btnFind.title = t('shell.findTooltip');
+btnOpen.dataset['tip'] = t('shell.openTooltip');
+btnFind.dataset['tip'] = t('shell.findTooltip');
 findInput.placeholder = t('shell.findPlaceholder');
 findPrev.title = t('shell.findPrev');
 findPrev.setAttribute('aria-label', t('shell.findPrev'));
@@ -67,8 +71,8 @@ findNext.title = t('shell.findNext');
 findNext.setAttribute('aria-label', t('shell.findNext'));
 findClose.title = t('shell.findClose');
 findClose.setAttribute('aria-label', t('shell.findClose'));
-btnPdf.title = t('shell.pdfTooltip');
-btnSave.title = t('shell.saveTooltip');
+btnPdf.dataset['tip'] = t('shell.pdfTooltip');
+btnSave.dataset['tip'] = t('shell.saveTooltip');
 dirtyDot.title = t('shell.dirtyTooltip');
 updatePill.title = t('shell.updateTooltip');
 updateClose.title = t('shell.updateHide');
@@ -97,7 +101,9 @@ function applyTheme(theme: Settings['shellTheme']): void {
   shellTheme = theme;
   if (theme === 'system') delete document.documentElement.dataset['theme'];
   else document.documentElement.dataset['theme'] = theme;
-  btnTheme.title = THEME_LABEL[theme];
+  // The theme button's tooltip is dynamic (system/light/dark) — update its
+  // data-tip so the custom tooltip reflects the current cycle position.
+  btnTheme.dataset['tip'] = THEME_LABEL[theme];
   for (const t of THEME_ORDER) {
     $(`theme-icon-${t}`).hidden = t !== theme;
   }
@@ -127,6 +133,16 @@ redra.onEditAvailability((state) => {
   btnUndo.disabled = !state.canUndo;
   btnRedo.disabled = !state.canRedo;
 });
+
+// --- fast custom tooltips (titlebar icons only) ---------------------------------
+
+// The native `title` is removed from these buttons (data-tip carries the text);
+// the tooltip module shows a quick dark pill below the button instead. Only the
+// titlebar .tb-btn icons — not the doc-view handle pill or B/I/<> toolbar.
+const tooltip = createTooltip(document);
+for (const b of [btnOpen, btnFind, btnUndo, btnRedo, btnPreview, btnPdf, btnSave, btnTheme]) {
+  tooltip.attach(b);
+}
 
 // --- find in document (⌘F) ------------------------------------------------------
 
