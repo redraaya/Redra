@@ -972,6 +972,16 @@ function registerIpc(): void {
     if (typeof message !== 'string' || message.length === 0 || message.length > 500) return;
     sendToShell(ctx, 'notice:show', { text: message });
   });
+  // Undo/redo availability from the doc preload → this window's shell, so the
+  // titlebar undo/redo buttons can enable/disable in step with the editing layer.
+  ipcMain.on('edit:availability', (event, state: unknown) => {
+    const ctx = docCtx(event);
+    if (!ctx) return;
+    if (typeof state !== 'object' || state === null) return;
+    const { canUndo, canRedo } = state as Record<string, unknown>;
+    if (typeof canUndo !== 'boolean' || typeof canRedo !== 'boolean') return;
+    sendToShell(ctx, 'edit:availability', { canUndo, canRedo });
+  });
   ipcMain.handle('ops:undo', (event, docId: unknown): OpUndoResult => {
     const ctx = docCtx(event);
     if (!ctx) return { ok: false, dirty: false };

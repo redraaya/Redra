@@ -12,6 +12,7 @@ import { createEditorController } from './editor/controller.js';
 import type { EditorController } from './editor/controller.js';
 import type {
   CloneBlockResult,
+  EditAvailability,
   ImageValueResult,
   ModeState,
   OpPushResult,
@@ -41,6 +42,9 @@ const bridge: RedraDocBridge = {
   pathForFile: (file) => webUtils.getPathForFile(file),
   notifyRejected: (message) => {
     ipcRenderer.send('ops:rejected-notice', message);
+  },
+  emitAvailability: (state: EditAvailability) => {
+    ipcRenderer.send('edit:availability', state);
   },
 };
 

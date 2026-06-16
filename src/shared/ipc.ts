@@ -207,6 +207,19 @@ export interface RedraDocBridge {
   pathForFile(file: File): string;
   /** A rejected push was rolled back — surface main's localized message as a shell toast. */
   notifyRejected(message: string): void;
+  /** Undo/redo availability changed — main relays it to this window's shell so
+   *  the titlebar undo/redo buttons can enable/disable. */
+  emitAvailability(state: EditAvailability): void;
+}
+
+/**
+ * Payload of 'edit:availability' (doc → main → shell): whether the titlebar
+ * undo/redo buttons should be enabled. canUndo includes an open edit session
+ * (its native contenteditable stack always has something to undo).
+ */
+export interface EditAvailability {
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 /** API exposed by the shell preload as window.redra. */

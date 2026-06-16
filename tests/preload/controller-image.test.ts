@@ -25,6 +25,7 @@ function makeBridge() {
     replaceImageFromPath: vi.fn(async () => ({ ok: true as const, value: DROPPED })),
     pathForFile: vi.fn(() => '/tmp/dropped.png'),
     notifyRejected: vi.fn(),
+    emitAvailability: vi.fn(),
   } satisfies RedraDocBridge;
 }
 

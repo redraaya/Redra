@@ -48,8 +48,8 @@ export function createEditorController(
   let destroyed = false;
 
   const overlay = new Overlay(doc, {
-    onDelete: () => deleteHoveredBlock(),
-    onDuplicate: () => duplicateHoveredBlock(),
+    onDelete: () => deleteBlockAction(),
+    onDuplicate: () => duplicateBlockAction(),
     onGripDown: (e) => {
       const block = overlay.currentBlock;
       if (!block || dragging || session) return;
@@ -85,6 +85,26 @@ export function createEditorController(
   let lastSelectionRange: Range | null = null;
   let toolbarUpdateQueued = false;
 
+  // --- undo/redo availability (titlebar buttons) ----------------------------
+
+  /**
+   * Push the current undo/redo availability to the shell (via main). canUndo
+   * is true while an edit session is open — its native contenteditable stack
+   * always has something to undo, and Esc/commit are themselves undoable
+   * actions from the user's point of view. Emitted on every transition:
+   * after pushOp, after handleUndo/handleRedo, and on session begin/end.
+   */
+  let lastCanUndo: boolean | null = null;
+  let lastCanRedo: boolean | null = null;
+  function emitAvailability(): void {
+    const canUndo = history.canUndo || !!session;
+    const canRedo = history.canRedo;
+    if (canUndo === lastCanUndo && canRedo === lastCanRedo) return;
+    lastCanUndo = canUndo;
+    lastCanRedo = canRedo;
+    bridge.emitAvailability({ canUndo, canRedo });
+  }
+
   // --- op transport ---------------------------------------------------------
 
   async function pushOp(op: Parameters<RedraDocBridge['pushOp']>[0]): Promise<void> {
@@ -100,6 +120,7 @@ export function createEditorController(
       history.undoAndDiscard();
       if (res.userMessage) bridge.notifyRejected(res.userMessage);
     }
+    emitAvailability(); // a push (or its rollback) changed the history stack
   }
 
   // --- image replacement (v0.2.0) -------------------------------------------
@@ -259,6 +280,14 @@ export function createEditorController(
     session = s;
     el.focus({ preventScroll: true });
     placeCaret(el, clickX, clickY);
+    // The handle stays anchored to the block being edited so duplicate/trash
+    // remain reachable mid-edit. Its box changes as the user types (a growing
+    // paragraph, a new line) — keep it re-anchored on every input. mouseover/
+    // refreshHoverUnderPointer are dormant during a session, so this handle is
+    // the only block UI on screen; no OTHER block can highlight.
+    overlay.showHandle(el);
+    el.addEventListener('input', queueReposition);
+    emitAvailability();
   }
 
   async function endSession(commit: boolean): Promise<void> {
@@ -267,18 +296,25 @@ export function createEditorController(
     session = null; // cleared first: the blur this triggers must be a no-op
     lastSelectionRange = null;
     overlay.toolbar.hide();
+    s.el.removeEventListener('input', queueReposition);
+    overlay.hideHandle(); // drop the session anchor; hover takes over again
     if (!commit) {
       revertSession(s);
+      emitAvailability(); // session is gone — canUndo may have dropped
       return;
     }
     const result = commitSession(s, normalize);
-    if (!result) return; // unchanged — no op, no history entry
+    if (!result) {
+      emitAvailability(); // unchanged — no op, but the session still ended
+      return;
+    }
     history.push({
       kind: 'editText',
       el: s.el,
       prevHtml: result.prevHtml,
       newHtml: result.newHtml,
     });
+    emitAvailability(); // history grew AND the session ended
     await pushOp(result.op);
   }
 
@@ -366,9 +402,8 @@ export function createEditorController(
    * returned fragment is STAMPED (cloneId / cloneId-n), so hover, edit,
    * drag and delete work on the copy immediately.
    */
-  function duplicateHoveredBlock(): void {
-    const block = overlay.currentBlock;
-    if (!block || session || dragging) return;
+  function duplicateBlock(block: HTMLElement): void {
+    if (dragging) return;
     const id = block.getAttribute(REDRA_ID_ATTR);
     const parent = block.parentNode as (Node & ParentNode) | null;
     if (!id || !parent) return;
@@ -401,19 +436,57 @@ export function createEditorController(
         return;
       }
       history.push({ kind: 'cloneBlock', node: inserted, parent, nextSibling: inserted.nextSibling });
+      emitAvailability();
     });
   }
 
-  function deleteHoveredBlock(): void {
-    const block = overlay.currentBlock;
-    if (!block) return;
+  function deleteBlock(block: HTMLElement): void {
     const id = block.getAttribute(REDRA_ID_ATTR);
     const parent = block.parentNode as (Node & ParentNode) | null;
     if (!id || !parent) return;
     clearHover();
     history.push({ kind: 'deleteBlock', node: block, parent, nextSibling: block.nextSibling });
     block.remove();
+    emitAvailability();
     void pushOp({ type: 'deleteBlock', id });
+  }
+
+  // --- handle-pill actions (hover OR active-session block) -------------------
+
+  /**
+   * The handle pill button targets either the hovered block or — when a text
+   * edit session is open — the block being edited (its handle stays anchored
+   * so the buttons remain reachable mid-edit). The session takes precedence:
+   * duplicate COMMITS the typed text first so the copy includes it; trash
+   * REVERTS the in-progress edit (no editText op) before removing the block.
+   */
+  function targetBlock(): HTMLElement | null {
+    return session?.el ?? overlay.currentBlock;
+  }
+
+  function duplicateBlockAction(): void {
+    if (dragging) return;
+    const block = targetBlock();
+    if (!block) return;
+    if (session) {
+      // Commit the edit so the typed text rides along into the clone, THEN
+      // duplicate the now-up-to-date block.
+      void endSession(true).then(() => duplicateBlock(block));
+      return;
+    }
+    duplicateBlock(block);
+  }
+
+  function deleteBlockAction(): void {
+    if (dragging) return;
+    const block = targetBlock();
+    if (!block) return;
+    if (session) {
+      // Discard the in-progress edit (revert, no editText op) before deleting
+      // — the block is about to vanish, so its typed text must not be recorded.
+      void endSession(false);
+    }
+    deleteBlock(block);
   }
 
   // --- event handlers ----------------------------------------------------------
@@ -614,6 +687,9 @@ export function createEditorController(
       editing = next;
       if (editing) {
         arm();
+        // Establish the shell's baseline: a freshly-opened doc has an empty
+        // history and no session, so both buttons start disabled.
+        emitAvailability();
       } else {
         // Main commits the session before flipping the mode; this is the
         // belt-and-braces path for a commit that raced or timed out.
@@ -633,6 +709,7 @@ export function createEditorController(
       }
       if (!history.canUndo) return;
       history.undo();
+      emitAvailability();
       void bridge.undo().then((res) => {
         if (!res.ok) console.error('[redra] undo desync: journal had nothing to undo');
       });
@@ -644,6 +721,7 @@ export function createEditorController(
       }
       if (!history.canRedo) return;
       history.redo();
+      emitAvailability();
       void bridge.redo().then((res) => {
         if (!res.ok) console.error('[redra] redo desync: journal had nothing to redo');
       });
