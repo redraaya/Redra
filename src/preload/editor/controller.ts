@@ -8,7 +8,7 @@ import type { EditSessionState, Normalize } from './session.js';
 import { LocalHistory } from './history.js';
 import { HANDLE_REACH, Overlay } from './overlay.js';
 import { startDrag } from './drag.js';
-import { toggleInlineTag } from './format.js';
+import { computeInlineToggle, toggleInlineTag } from './format.js';
 import { selectionContext } from './toolbar.js';
 import type { ToolbarAction } from './toolbar.js';
 
@@ -212,14 +212,29 @@ export function createEditorController(
         doc.execCommand?.('italic');
         break;
       case 'code': {
-        // execCommand has no "code" — manual Range surgery (see format.ts).
+        // execCommand has no native "code" command. Compute the wrap/unwrap
+        // (decision identical to toggleInlineTag) and apply it as ONE
+        // insertHTML so it lands on the SAME native undo stack as
+        // bold/italic/typing — ⌘Z then reverts it in correct chronological
+        // order. insertHTML replaces the current selection, so we first
+        // select the range the plan tells us to (the whole <code> element for
+        // an unwrap, the user's selection for a wrap).
         const sel = win.getSelection?.();
         if (!sel || sel.rangeCount === 0 || sel.isCollapsed) break;
         const range = sel.getRangeAt(0);
         if (!session.el.contains(range.commonAncestorContainer)) break;
-        toggleInlineTag(range, 'code', session.el);
+        const plan = computeInlineToggle(range, 'code', session.el);
         sel.removeAllRanges();
-        sel.addRange(range);
+        sel.addRange(plan.selectRange);
+        // insertHTML records on the native stack; fall back to direct Range
+        // surgery when execCommand is unavailable (jsdom) or it reports
+        // failure (older engines), so the toggle still works there.
+        const inserted = doc.execCommand?.('insertHTML', false, plan.html) === true;
+        if (!inserted) {
+          toggleInlineTag(range, 'code', session.el);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
         break;
       }
       case 'link':

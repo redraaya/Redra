@@ -28,6 +28,48 @@ function unwrapElement(el: Element): void {
 }
 
 /**
+ * A plan for applying an inline-tag toggle via a SINGLE
+ * `document.execCommand('insertHTML', …)` so the mutation lands on the same
+ * native contenteditable undo stack as bold/italic/typing (one ⌘Z reverts
+ * it, in correct chronological order). Decision logic mirrors
+ * {@link toggleInlineTag}; only the application differs (insertHTML replaces
+ * the selection, so the plan also carries the range to select first).
+ *
+ * - unwrap: select the WHOLE existing `<tag>` ancestor, replace it with its
+ *   own inner HTML (wrapper gone) — matches "toggle off the whole element"
+ *   even for a partial inner selection.
+ * - wrap: keep the current range, replace it with its contents wrapped in one
+ *   `<tag>`, nested same-tags dissolved (no `<code><code>`).
+ *
+ * The caller is expected to have already rejected a collapsed selection
+ * (nothing to toggle); this function always returns a plan.
+ */
+export function computeInlineToggle(
+  range: Range,
+  tag: string,
+  boundary: Node,
+): { mode: 'wrapped' | 'unwrapped'; selectRange: Range; html: string } {
+  const doc = boundary.ownerDocument;
+  if (!doc) throw new Error('boundary is not attached to a document');
+  const existing = closestTag(range.commonAncestorContainer, tag, boundary);
+  if (existing) {
+    // Replace the ENTIRE element (not just the selected slice) with its
+    // contents — so selecting the whole element before insertHTML is what
+    // makes the unwrap span the whole element, not the user's sub-selection.
+    const selectRange = doc.createRange();
+    selectRange.selectNode(existing);
+    return { mode: 'unwrapped', selectRange, html: existing.innerHTML };
+  }
+  const contents = range.cloneContents();
+  for (const nested of Array.from(contents.querySelectorAll(tag))) {
+    unwrapElement(nested);
+  }
+  const wrapper = doc.createElement(tag);
+  wrapper.appendChild(contents);
+  return { mode: 'wrapped', selectRange: range, html: wrapper.outerHTML };
+}
+
+/**
  * Toggle an inline wrapper tag (v1: 'code' — execCommand has no such
  * command) over the selection range, scoped to `boundary` (the session
  * element):

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
-import { closestTag, toggleInlineTag } from '../../src/preload/editor/format.js';
+import { closestTag, computeInlineToggle, toggleInlineTag } from '../../src/preload/editor/format.js';
 
 let host: HTMLElement;
 
@@ -108,5 +108,104 @@ describe('toggleInlineTag — unwrap', () => {
     toggleInlineTag(range, 'code', host);
     expect(host.querySelector('code')).toBeNull();
     expect(host.textContent).toBe('roundtrip');
+  });
+});
+
+/**
+ * computeInlineToggle is the pure transform that feeds the native-undo path:
+ * it produces the HTML to hand to a single document.execCommand('insertHTML')
+ * plus the range to select first, WITHOUT mutating the live DOM. These tests
+ * assert that transform deterministically (jsdom has no execCommand, so the
+ * actual insertHTML + native ⌘Z is verified manually in the real app — see
+ * the report). The produced html for the wrap case must match what the old
+ * direct-mutation toggleInlineTag wrote, and the unwrap plan must select the
+ * WHOLE existing element so insertHTML of its inner html drops the wrapper.
+ */
+describe('computeInlineToggle — pure transform (native-undo path)', () => {
+  it('does not mutate the live DOM (it only computes a plan)', () => {
+    host.textContent = 'hello world';
+    const text = host.firstChild!;
+    const range = rangeOver(text, 6, text, 11);
+
+    computeInlineToggle(range, 'code', host);
+    expect(host.innerHTML).toBe('hello world'); // untouched
+  });
+
+  it('wrap: plan selects the user range and inserts the wrapped html', () => {
+    host.textContent = 'hello world';
+    const text = host.firstChild!;
+    const range = rangeOver(text, 6, text, 11);
+
+    const plan = computeInlineToggle(range, 'code', host);
+    expect(plan.mode).toBe('wrapped');
+    expect(plan.html).toBe('<code>world</code>');
+    expect(plan.selectRange).toBe(range); // wrap replaces the user's selection
+  });
+
+  it('wrap: dissolves nested same-tags inside the produced html (no <code><code>)', () => {
+    host.innerHTML = 'xx <code>yy</code> zz';
+    const range = document.createRange();
+    range.setStart(host.firstChild!, 0);
+    range.setEnd(host.lastChild!, 3);
+
+    const plan = computeInlineToggle(range, 'code', host);
+    expect(plan.mode).toBe('wrapped');
+    expect(plan.html).toBe('<code>xx yy zz</code>');
+  });
+
+  it('wrap: keeps other inline elements inside the produced html', () => {
+    host.innerHTML = 'aa <b>bb</b> cc';
+    const range = document.createRange();
+    range.setStart(host.firstChild!, 0);
+    range.setEnd(host.lastChild!, 3);
+
+    const plan = computeInlineToggle(range, 'code', host);
+    expect(plan.html).toBe('<code>aa <b>bb</b> cc</code>');
+  });
+
+  it('unwrap: plan selects the WHOLE element and inserts its inner html (wrapper gone)', () => {
+    host.innerHTML = '<code id="c">one two three</code>';
+    const code = document.getElementById('c')!;
+    const codeText = code.firstChild!;
+    const range = rangeOver(codeText, 4, codeText, 7); // just 'two' — partial
+
+    const plan = computeInlineToggle(range, 'code', host);
+    expect(plan.mode).toBe('unwrapped');
+    expect(plan.html).toBe('one two three'); // the wrapper's contents, no <code>
+    // The select-range spans the entire <code> element, so an insertHTML of
+    // plan.html replaces the whole wrapper — "toggle off the whole element".
+    expect(plan.selectRange.toString()).toBe('one two three');
+  });
+
+  it('the plan, applied by hand, matches the direct-mutation toggleInlineTag', () => {
+    // Mirror the real controller: select plan.selectRange, then replace its
+    // contents with plan.html. The result must equal what toggleInlineTag
+    // produces by direct surgery — proving the native path is behaviour-equal.
+    const apply = (start: string): string => {
+      document.body.innerHTML = `<p id="h">${start}</p>`;
+      const h = document.getElementById('h')!;
+      const r = document.createRange();
+      r.setStart(h.firstChild!, 0);
+      r.setEnd(h.lastChild!, (h.lastChild as Text).length ?? 0);
+      // Select the FULL paragraph contents for a clean comparison.
+      r.selectNodeContents(h);
+      const plan = computeInlineToggle(r, 'code', h);
+      // Emulate insertHTML(plan.html) over plan.selectRange:
+      plan.selectRange.deleteContents();
+      const frag = r.createContextualFragment(plan.html);
+      plan.selectRange.insertNode(frag);
+      return h.innerHTML;
+    };
+    const direct = (start: string): string => {
+      document.body.innerHTML = `<p id="h">${start}</p>`;
+      const h = document.getElementById('h')!;
+      const r = document.createRange();
+      r.selectNodeContents(h);
+      toggleInlineTag(r, 'code', h);
+      return h.innerHTML;
+    };
+    for (const start of ['hello world', '<code>already code</code>', 'a <b>b</b> c']) {
+      expect(apply(start)).toBe(direct(start));
+    }
   });
 });

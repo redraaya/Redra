@@ -155,6 +155,30 @@ describe('editor controller (jsdom)', () => {
     expect(e.defaultPrevented).toBe(false);
     expect(el('a').hasAttribute('contenteditable')).toBe(false);
   });
+
+  // --- in-session undo routing (v0.3.5) -------------------------------------
+  // jsdom has no document.execCommand. We install a spy so we can assert the
+  // controller routes ⌘Z/⌘⇧Z through the NATIVE contenteditable undo stack
+  // while a session is active (where bold/italic/typing AND now the code
+  // toggle all live), and that a false return from it never throws.
+
+  it('routes ⌘Z to native execCommand("undo") while a session is active', () => {
+    const exec = vi.fn(() => false); // "nothing to undo" — must not throw
+    (document as unknown as { execCommand: typeof exec }).execCommand = exec;
+    try {
+      click(el('a')); // open a session
+      expect(el('a').getAttribute('contenteditable')).toBe('true');
+      controller.handleUndo();
+      controller.handleRedo();
+      expect(exec).toHaveBeenCalledWith('undo');
+      expect(exec).toHaveBeenCalledWith('redo');
+      // The journal-level bridge undo/redo must NOT fire during a session.
+      expect(bridge.undo).not.toHaveBeenCalled();
+      expect(bridge.redo).not.toHaveBeenCalled();
+    } finally {
+      delete (document as { execCommand?: unknown }).execCommand;
+    }
+  });
 });
 
 describe('hover survives the trip to the handle pill', () => {
