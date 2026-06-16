@@ -308,7 +308,12 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* `safe center`: centered when it fits, but top-anchored and scrollable
+     when the Recent list is long — so the glyph never overflows up under the
+     title bar and the last rows never run off the bottom edge. */
+  justify-content: safe center;
+  overflow-y: auto;
+  padding: 24px 0;
 }
 
 body[data-state='doc'] #start {
