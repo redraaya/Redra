@@ -58,12 +58,18 @@ const t = makeT(lang);
 modePill.textContent = t('shell.modePreview');
 // Titlebar .tb-btn icons carry their localized tooltip in data-tip (consumed
 // by the custom tooltip module); the native `title` is deliberately absent so
-// there is no slow double tooltip.
-btnPreview.dataset['tip'] = t('shell.previewTooltip');
-btnUndo.dataset['tip'] = t('shell.undoTooltip');
-btnRedo.dataset['tip'] = t('shell.redoTooltip');
-btnOpen.dataset['tip'] = t('shell.openTooltip');
-btnFind.dataset['tip'] = t('shell.findTooltip');
+// there is no slow double tooltip. The SAME localized string is mirrored into
+// aria-label so the icon-only buttons keep an accessible name (data-tip alone
+// is invisible to assistive tech).
+const tipA11y = (btn: HTMLElement, text: string): void => {
+  btn.dataset['tip'] = text;
+  btn.setAttribute('aria-label', text);
+};
+tipA11y(btnPreview, t('shell.previewTooltip'));
+tipA11y(btnUndo, t('shell.undoTooltip'));
+tipA11y(btnRedo, t('shell.redoTooltip'));
+tipA11y(btnOpen, t('shell.openTooltip'));
+tipA11y(btnFind, t('shell.findTooltip'));
 findInput.placeholder = t('shell.findPlaceholder');
 findPrev.title = t('shell.findPrev');
 findPrev.setAttribute('aria-label', t('shell.findPrev'));
@@ -71,8 +77,8 @@ findNext.title = t('shell.findNext');
 findNext.setAttribute('aria-label', t('shell.findNext'));
 findClose.title = t('shell.findClose');
 findClose.setAttribute('aria-label', t('shell.findClose'));
-btnPdf.dataset['tip'] = t('shell.pdfTooltip');
-btnSave.dataset['tip'] = t('shell.saveTooltip');
+tipA11y(btnPdf, t('shell.pdfTooltip'));
+tipA11y(btnSave, t('shell.saveTooltip'));
 dirtyDot.title = t('shell.dirtyTooltip');
 updatePill.title = t('shell.updateTooltip');
 updateClose.title = t('shell.updateHide');
@@ -102,8 +108,9 @@ function applyTheme(theme: Settings['shellTheme']): void {
   if (theme === 'system') delete document.documentElement.dataset['theme'];
   else document.documentElement.dataset['theme'] = theme;
   // The theme button's tooltip is dynamic (system/light/dark) — update its
-  // data-tip so the custom tooltip reflects the current cycle position.
-  btnTheme.dataset['tip'] = THEME_LABEL[theme];
+  // data-tip AND aria-label so both the custom tooltip and assistive tech
+  // reflect the current cycle position.
+  tipA11y(btnTheme, THEME_LABEL[theme]);
   for (const t of THEME_ORDER) {
     $(`theme-icon-${t}`).hidden = t !== theme;
   }

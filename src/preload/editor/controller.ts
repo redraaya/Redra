@@ -88,17 +88,18 @@ export function createEditorController(
   // --- undo/redo availability (titlebar buttons) ----------------------------
 
   /**
-   * Push the current undo/redo availability to the shell (via main). canUndo
-   * is true while an edit session is open — its native contenteditable stack
-   * always has something to undo, and Esc/commit are themselves undoable
-   * actions from the user's point of view. Emitted on every transition:
+   * Push the current undo/redo availability to the shell (via main). Both
+   * canUndo and canRedo are true while an edit session is open — its native
+   * contenteditable stack is independently undoable/redoable, and handleUndo/
+   * handleRedo route to execCommand('undo'|'redo') in the session branch, so
+   * the buttons must stay live to reach it. Emitted on every transition:
    * after pushOp, after handleUndo/handleRedo, and on session begin/end.
    */
   let lastCanUndo: boolean | null = null;
   let lastCanRedo: boolean | null = null;
   function emitAvailability(): void {
     const canUndo = history.canUndo || !!session;
-    const canRedo = history.canRedo;
+    const canRedo = history.canRedo || !!session;
     if (canUndo === lastCanUndo && canRedo === lastCanRedo) return;
     lastCanUndo = canUndo;
     lastCanRedo = canRedo;

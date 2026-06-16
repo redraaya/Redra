@@ -151,8 +151,9 @@ describe('handle stays anchored during an edit session (jsdom)', () => {
 
     bridge.emitAvailability.mockClear();
     click(el('a'));
-    // The most recent emit after opening a session reports canUndo=true.
-    expect(emits().at(-1)?.[0]).toEqual({ canUndo: true, canRedo: false });
+    // The most recent emit after opening a session keeps BOTH live: the native
+    // contenteditable stack is independently undoable/redoable via execCommand.
+    expect(emits().at(-1)?.[0]).toEqual({ canUndo: true, canRedo: true });
 
     bridge.emitAvailability.mockClear();
     el('a').dispatchEvent(

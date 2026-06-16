@@ -83,6 +83,18 @@ describe('createTooltip (jsdom)', () => {
     expect(tip.element.hidden).toBe(true);
   });
 
+  it('hides the pill on window blur (Cmd+Tab / programmatic focus loss)', () => {
+    const tip = createTooltip(document);
+    const b = makeButton('Найти (⌘F)');
+    tip.attach(b);
+    b.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    expect(tip.element.hidden).toBe(false);
+
+    window.dispatchEvent(new Event('blur'));
+    expect(tip.element.hidden).toBe(true);
+  });
+
   it('a button without data-tip never shows the pill', () => {
     const tip = createTooltip(document);
     const b = document.createElement('button'); // no data-tip

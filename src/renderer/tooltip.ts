@@ -98,12 +98,25 @@ export function createTooltip(
     button.addEventListener('blur', hide);
   }
 
+  // The pill can outlive the pointer when focus leaves the window without a
+  // mouseleave — Cmd+Tab away, a programmatic blur, or the tab going hidden.
+  // Hide on window blur and on visibilitychange (when hidden) so it never
+  // lingers over another app's window.
+  const onVisibility = (): void => {
+    if (doc.visibilityState === 'hidden') hide();
+  };
+  const view = doc.defaultView;
+  view?.addEventListener('blur', hide);
+  doc.addEventListener('visibilitychange', onVisibility);
+
   return {
     element: pill,
     attach,
     hide,
     destroy(): void {
       hide();
+      view?.removeEventListener('blur', hide);
+      doc.removeEventListener('visibilitychange', onVisibility);
       pill.remove();
     },
   };
