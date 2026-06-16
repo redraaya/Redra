@@ -4,7 +4,6 @@ import { formatRelativeTime } from '../shared/relative-time';
 import { FindBarModel } from './find-bar';
 import type { FindCommand } from './find-bar';
 import { createNoticeToast } from './notice';
-import { createTooltip } from './tooltip';
 import './style.css';
 
 declare global {
@@ -56,13 +55,14 @@ const lang = pickLang(navigator.language);
 const t = makeT(lang);
 
 modePill.textContent = t('shell.modePreview');
-// Titlebar .tb-btn icons carry their localized tooltip in data-tip (consumed
-// by the custom tooltip module); the native `title` is deliberately absent so
-// there is no slow double tooltip. The SAME localized string is mirrored into
-// aria-label so the icon-only buttons keep an accessible name (data-tip alone
-// is invisible to assistive tech).
+// Titlebar .tb-btn icons use the native `title` tooltip: Chromium draws it on a
+// top-level OS surface that floats over the document WebContentsView, whereas a
+// DOM tooltip in this shell renderer would be composited BEHIND the doc view
+// (everything below the 44px strip is). Native is slower (OS hover delay) but
+// reliable beats invisible. The SAME localized string is mirrored into
+// aria-label so the icon-only buttons keep an accessible name.
 const tipA11y = (btn: HTMLElement, text: string): void => {
-  btn.dataset['tip'] = text;
+  btn.title = text;
   btn.setAttribute('aria-label', text);
 };
 tipA11y(btnPreview, t('shell.previewTooltip'));
@@ -108,7 +108,7 @@ function applyTheme(theme: Settings['shellTheme']): void {
   if (theme === 'system') delete document.documentElement.dataset['theme'];
   else document.documentElement.dataset['theme'] = theme;
   // The theme button's tooltip is dynamic (system/light/dark) — update its
-  // data-tip AND aria-label so both the custom tooltip and assistive tech
+  // native `title` AND aria-label so both the OS tooltip and assistive tech
   // reflect the current cycle position.
   tipA11y(btnTheme, THEME_LABEL[theme]);
   for (const t of THEME_ORDER) {
@@ -134,22 +134,14 @@ btnPreview.addEventListener('click', () => redra.togglePreview());
 btnPdf.addEventListener('click', () => void redra.exportPdf());
 btnSave.addEventListener('click', () => void redra.save());
 
-// Undo/redo availability streamed from the doc view (via main). Until the
-// first event after a doc opens, both buttons stay disabled (set below).
+// Undo/redo availability streamed from the doc view (via main). The buttons are
+// HIDDEN until relevant: Undo appears once an edit makes it possible, Redo once
+// an undo does — and both vanish again when nothing is undoable/redoable. A
+// freshly opened document (empty history) therefore shows neither.
 redra.onEditAvailability((state) => {
-  btnUndo.disabled = !state.canUndo;
-  btnRedo.disabled = !state.canRedo;
+  btnUndo.hidden = !state.canUndo;
+  btnRedo.hidden = !state.canRedo;
 });
-
-// --- fast custom tooltips (titlebar icons only) ---------------------------------
-
-// The native `title` is removed from these buttons (data-tip carries the text);
-// the tooltip module shows a quick dark pill below the button instead. Only the
-// titlebar .tb-btn icons — not the doc-view handle pill or B/I/<> toolbar.
-const tooltip = createTooltip(document);
-for (const b of [btnOpen, btnFind, btnUndo, btnRedo, btnPreview, btnPdf, btnSave, btnTheme]) {
-  tooltip.attach(b);
-}
 
 // --- find in document (⌘F) ------------------------------------------------------
 
@@ -231,11 +223,13 @@ redra.onDocOpened((info) => {
   syncFindBar();
   // Start screen → doc state: theme button yields to the document actions.
   btnTheme.hidden = true;
-  for (const b of [btnFind, btnUndo, btnRedo, btnPreview, btnPdf, btnSave]) b.hidden = false;
-  // A fresh document has an empty history: both stay disabled until the doc
-  // view's editing layer reports availability (it emits on arm + every change).
-  btnUndo.disabled = true;
-  btnRedo.disabled = true;
+  for (const b of [btnFind, btnPreview, btnPdf, btnSave]) b.hidden = false;
+  // Undo/redo are NOT shown on doc open: a fresh document has an empty history,
+  // so both stay hidden until onEditAvailability reports something is possible
+  // (the editing layer emits on arm + every change). The first edit reveals
+  // Undo; an undo that enables redo reveals Redo.
+  btnUndo.hidden = true;
+  btnRedo.hidden = true;
   void renderRecents();
 });
 

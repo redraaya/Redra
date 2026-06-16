@@ -258,28 +258,6 @@ body {
   display: none;
 }
 
-/* Fast custom tooltip for the titlebar icon buttons (see renderer/tooltip.ts).
-   A dark pill positioned just below the button — fixed, above everything in
-   the strip, and always below the 44px line so it never covers a button. The
-   dark surface is intentional in BOTH themes (a quiet, legible chip). */
-#tb-tooltip {
-  position: fixed;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: #232220;
-  color: #eceae6;
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(20, 18, 14, 0.22);
-  pointer-events: none;
-  z-index: 50;
-}
-
-#tb-tooltip[hidden] {
-  display: none;
-}
-
 .tb-btn {
   width: 30px;
   height: 30px;
