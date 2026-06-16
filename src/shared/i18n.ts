@@ -118,6 +118,8 @@ const STRINGS = {
   'shell.findPrev': { ru: 'Предыдущее совпадение', en: 'Previous match' },
   'shell.findNext': { ru: 'Следующее совпадение', en: 'Next match' },
   'shell.findClose': { ru: 'Закрыть поиск', en: 'Close find' },
+  'shell.undoTooltip': { ru: 'Отменить (⌘Z)', en: 'Undo (⌘Z)' },
+  'shell.redoTooltip': { ru: 'Повторить (⇧⌘Z)', en: 'Redo (⇧⌘Z)' },
   'shell.previewTooltip': { ru: 'Просмотр (⌘E)', en: 'Preview (⌘E)' },
   'shell.pdfTooltip': { ru: 'Экспорт в PDF… (⇧⌘E)', en: 'Export to PDF… (⇧⌘E)' },
   'shell.saveTooltip': { ru: 'Сохранить (⌘S)', en: 'Save (⌘S)' },

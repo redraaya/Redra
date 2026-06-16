@@ -28,6 +28,8 @@ const modePill = $('mode-pill');
 const updatePill = $('update-pill');
 const updateText = $('update-text');
 const updateClose = $('update-close') as HTMLButtonElement;
+const btnUndo = $('btn-undo') as HTMLButtonElement;
+const btnRedo = $('btn-redo') as HTMLButtonElement;
 const btnPreview = $('btn-preview') as HTMLButtonElement;
 const btnPdf = $('btn-pdf') as HTMLButtonElement;
 const btnSave = $('btn-save') as HTMLButtonElement;
@@ -54,6 +56,8 @@ const t = makeT(lang);
 
 modePill.textContent = t('shell.modePreview');
 btnPreview.title = t('shell.previewTooltip');
+btnUndo.dataset['tip'] = t('shell.undoTooltip');
+btnRedo.dataset['tip'] = t('shell.redoTooltip');
 btnOpen.title = t('shell.openTooltip');
 btnFind.title = t('shell.findTooltip');
 findInput.placeholder = t('shell.findPlaceholder');
@@ -111,9 +115,18 @@ void redra.getSettings().then((s) => applyTheme(s.shellTheme));
 
 // Visible in BOTH states (start screen and doc) — the one always-there action.
 btnOpen.addEventListener('click', () => void redra.openFileDialog());
+btnUndo.addEventListener('click', () => redra.undo());
+btnRedo.addEventListener('click', () => redra.redo());
 btnPreview.addEventListener('click', () => redra.togglePreview());
 btnPdf.addEventListener('click', () => void redra.exportPdf());
 btnSave.addEventListener('click', () => void redra.save());
+
+// Undo/redo availability streamed from the doc view (via main). Until the
+// first event after a doc opens, both buttons stay disabled (set below).
+redra.onEditAvailability((state) => {
+  btnUndo.disabled = !state.canUndo;
+  btnRedo.disabled = !state.canRedo;
+});
 
 // --- find in document (⌘F) ------------------------------------------------------
 
@@ -195,7 +208,11 @@ redra.onDocOpened((info) => {
   syncFindBar();
   // Start screen → doc state: theme button yields to the document actions.
   btnTheme.hidden = true;
-  for (const b of [btnFind, btnPreview, btnPdf, btnSave]) b.hidden = false;
+  for (const b of [btnFind, btnUndo, btnRedo, btnPreview, btnPdf, btnSave]) b.hidden = false;
+  // A fresh document has an empty history: both stay disabled until the doc
+  // view's editing layer reports availability (it emits on arm + every change).
+  btnUndo.disabled = true;
+  btnRedo.disabled = true;
   void renderRecents();
 });
 

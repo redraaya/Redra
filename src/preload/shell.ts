@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type {
   DirtyState,
   DocOpenedInfo,
+  EditAvailability,
   ExportResult,
   FindResult,
   ModeState,
@@ -23,6 +24,11 @@ const api: RedraShellApi = {
   saveAs: () => ipcRenderer.invoke('doc:saveAs') as Promise<SaveResult>,
   exportPdf: () => ipcRenderer.invoke('doc:exportPdf') as Promise<ExportResult>,
   togglePreview: () => ipcRenderer.send('mode:toggle'),
+  undo: () => ipcRenderer.send('edit:undo'),
+  redo: () => ipcRenderer.send('edit:redo'),
+  onEditAvailability: (cb: (state: EditAvailability) => void) => {
+    ipcRenderer.on('edit:availability', (_event, state: EditAvailability) => cb(state));
+  },
   findStart: (text: string) => ipcRenderer.send('find:start', text),
   findNext: (text: string, forward: boolean) => ipcRenderer.send('find:next', text, forward),
   findStop: () => ipcRenderer.send('find:stop'),

@@ -15,6 +15,9 @@
  *
  * Channels (shell renderer → main, send):
  *   'mode:toggle'      ()  — flip Preview; main stays the single source of truth
+ *   'edit:undo'        ()  — titlebar undo button; main routes to the focused
+ *                            window's doc view (same event the menu sends)
+ *   'edit:redo'        ()  — titlebar redo button; routed like 'edit:undo'
  *   'find:start'       (text: string)            — findInPage on the doc view
  *                                                  (new session); empty text stops
  *   'find:next'        (text: string, forward: boolean) — step the active session
@@ -48,6 +51,8 @@
  *   'ops:rejected-notice' (message: string)        — a rejected push was rolled back and
  *                                                    deserves a user-visible notice; main
  *                                                    forwards it to the shell as 'notice:show'
+ *   'edit:availability' (state: EditAvailability)  — undo/redo availability changed; main
+ *                                                    relays it to this window's shell
  *
  * Events (main → shell renderer):
  *   'doc:opened'        DocOpenedInfo
@@ -58,6 +63,8 @@
  *   'find:result'       FindResult   — found-in-page from the doc view (counter)
  *   'update:available'  UpdateInfo   — once per launch, ~8s after ready, only
  *                                      when a newer non-dismissed release exists
+ *   'edit:availability' EditAvailability — relayed from the doc view; drives the
+ *                                          titlebar undo/redo buttons' enabled state
  *
  * Events (main → doc preload):
  *   'mode:set'          ModeState    — arm/disarm the editing layer
@@ -233,6 +240,12 @@ export interface RedraShellApi {
   exportPdf(): Promise<ExportResult>;
   /** Flip Preview — main owns the state and answers with 'mode:changed'. */
   togglePreview(): void;
+  /** Undo/redo the focused window's document — main routes to its doc view
+   *  via the SAME 'edit:undo'/'edit:redo' events the menu uses. */
+  undo(): void;
+  redo(): void;
+  /** Undo/redo availability from the doc view, for the titlebar buttons. */
+  onEditAvailability(cb: (state: EditAvailability) => void): void;
   /** Find in the document (native findInPage on the doc view). */
   findStart(text: string): void;
   findNext(text: string, forward: boolean): void;

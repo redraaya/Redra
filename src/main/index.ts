@@ -849,6 +849,14 @@ function registerIpc(): void {
     if (!ctx?.docManager.currentDoc) return; // no doc — nothing to preview
     setPreview(ctx, !ctx.previewOn);
   });
+  // Titlebar undo/redo buttons: route to the sender window's doc view via the
+  // SAME events the menu's Cmd+Z / Cmd+Shift+Z send (menuHandlers.undo/redo).
+  ipcMain.on('edit:undo', (event) => {
+    shellCtx(event)?.docView?.webContents.send('edit:undo');
+  });
+  ipcMain.on('edit:redo', (event) => {
+    shellCtx(event)?.docView?.webContents.send('edit:redo');
+  });
   // --- find in document (⌘F, v0.3.0) ---
   // The bar lives in the shell, the search runs on that window's DOC view.
   // NB Electron semantics: findNext:true BEGINS a session, false steps it.
