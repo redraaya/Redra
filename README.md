@@ -12,6 +12,17 @@ disk. No code, no broken layout. Or export it to PDF.
 
 ![Redra features](docs/assets/features.png)
 
+**New in v0.4.0:**
+
+- **Edit-by-edit undo** — ⌘Z steps back one edit at a time (a word, a line, a
+  format, a block move) instead of wiping a whole block at once; fix three
+  spots in a paragraph and it's three undos. ⌘⇧Z redoes the same way.
+- **Undo / Redo buttons** in the title bar — a clean pair that appears only
+  when there's actually something to undo or redo.
+- **Clearer editing** — a soft blue highlight on the block under your cursor, a
+  red outline on the block you're editing, and the block handle stays put while
+  you type. Instant title-bar tooltips, in English and Russian.
+
 **New in v0.3.0:**
 
 - **Multiple windows** — every document opens in its own window (or a native
