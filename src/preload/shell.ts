@@ -13,6 +13,7 @@ import type {
   RedraShellApi,
   SaveResult,
   Settings,
+  TipInfo,
   UpdateInfo,
 } from '../shared/ipc.js';
 
@@ -29,6 +30,8 @@ const api: RedraShellApi = {
   onEditAvailability: (cb: (state: EditAvailability) => void) => {
     ipcRenderer.on('edit:availability', (_event, state: EditAvailability) => cb(state));
   },
+  tipShow: (info: TipInfo) => ipcRenderer.send('tip:show', info),
+  tipHide: () => ipcRenderer.send('tip:hide'),
   findStart: (text: string) => ipcRenderer.send('find:start', text),
   findNext: (text: string, forward: boolean) => ipcRenderer.send('find:next', text, forward),
   findStop: () => ipcRenderer.send('find:stop'),

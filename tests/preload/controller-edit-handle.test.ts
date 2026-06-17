@@ -143,18 +143,31 @@ describe('handle stays anchored during an edit session (jsdom)', () => {
     expect(a.hasAttribute('contenteditable')).toBe(false); // session closed
   });
 
-  it('emits availability on session begin (canUndo) and end', () => {
+  it('reveals Undo only after an actual edit; Redo never on begin; clears on Escape', () => {
     const emits = (): Array<[{ canUndo: boolean; canRedo: boolean }]> =>
       bridge.emitAvailability.mock.calls as unknown as Array<
         [{ canUndo: boolean; canRedo: boolean }]
       >;
 
+    // A bare click-in does nothing yet — NO premature buttons (the user's
+    // complaint): every availability emitted while just opening reports both
+    // false. Redo in particular must never appear before an undo.
     bridge.emitAvailability.mockClear();
     click(el('a'));
-    // The most recent emit after opening a session keeps BOTH live: the native
-    // contenteditable stack is independently undoable/redoable via execCommand.
-    expect(emits().at(-1)?.[0]).toEqual({ canUndo: true, canRedo: true });
+    for (const [state] of emits()) {
+      expect(state.canUndo).toBe(false);
+      expect(state.canRedo).toBe(false);
+    }
 
+    // The first real change reveals Undo (never Redo).
+    bridge.emitAvailability.mockClear();
+    el('a').innerHTML = 'привет мир!';
+    el('a').dispatchEvent(
+      new InputEvent('input', { inputType: 'insertText', data: '!', bubbles: true }),
+    );
+    expect(emits().at(-1)?.[0]).toEqual({ canUndo: true, canRedo: false });
+
+    // Escape rolls it all back — both clear.
     bridge.emitAvailability.mockClear();
     el('a').dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),

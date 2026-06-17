@@ -120,12 +120,16 @@ describe('block duplication via the handle pill (jsdom)', () => {
     await flush();
     expect(blockIds()).toBe('rA,c1,rB');
 
+    // The live DOM undoes synchronously (instant feedback); the journal IPC is
+    // serialized through the FIFO transport, so it lands a microtask later.
     controller.handleUndo();
     expect(blockIds()).toBe('rA,rB');
+    await flush();
     expect(bridge.undo).toHaveBeenCalledTimes(1);
 
     controller.handleRedo();
     expect(blockIds()).toBe('rA,c1,rB');
+    await flush();
     expect(bridge.redo).toHaveBeenCalledTimes(1);
   });
 

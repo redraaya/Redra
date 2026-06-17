@@ -18,6 +18,10 @@
  *   'edit:undo'        ()  — titlebar undo button; main routes to the focused
  *                            window's doc view (same event the menu sends)
  *   'edit:redo'        ()  — titlebar redo button; routed like 'edit:undo'
+ *   'tip:show'         (info: TipInfo) — titlebar tooltip hover; main relays to
+ *                            the sender's doc view (converting the y into doc-
+ *                            view space) so it is drawn OVER the document
+ *   'tip:hide'         ()  — the hover ended; relayed to the doc view
  *   'find:start'       (text: string)            — findInPage on the doc view
  *                                                  (new session); empty text stops
  *   'find:next'        (text: string, forward: boolean) — step the active session
@@ -70,6 +74,8 @@
  *   'mode:set'          ModeState    — arm/disarm the editing layer
  *   'edit:undo'         ()           — menu Cmd+Z routed to the doc view
  *   'edit:redo'         ()           — menu Cmd+Shift+Z routed to the doc view
+ *   'tip:show'          TipInfo      — draw the titlebar tooltip over the document
+ *   'tip:hide'          ()           — hide it
  *   'edit:commit'       (nonce: string) — commit any active edit session, then
  *                                         reply on 'edit:committed' with the nonce
  */
@@ -221,12 +227,29 @@ export interface RedraDocBridge {
 
 /**
  * Payload of 'edit:availability' (doc → main → shell): whether the titlebar
- * undo/redo buttons should be enabled. canUndo includes an open edit session
- * (its native contenteditable stack always has something to undo).
+ * undo/redo buttons should be shown. There is ONE undo timeline — the journal
+ * mirrored by the doc view's local stack; no native contenteditable tier.
+ *   canRedo — true ONLY after an undo (cleared by any new edit), so Redo never
+ *     appears just because you clicked into a block.
+ *   canUndo — true when the journal has history OR the open session has an
+ *     un-checkpointed change, so Undo appears the moment you edit something,
+ *     but not on a bare click-in.
  */
 export interface EditAvailability {
   canUndo: boolean;
   canRedo: boolean;
+}
+
+/**
+ * Payload of 'tip:show': the titlebar tooltip text and where to put it. x is
+ * the hovered icon's horizontal centre; y is the pill's top edge. Coordinates
+ * are in WINDOW-content space when sent by the shell; main converts y into
+ * doc-view space (subtracting the strip height) before relaying.
+ */
+export interface TipInfo {
+  text: string;
+  x: number;
+  y: number;
 }
 
 /** API exposed by the shell preload as window.redra. */
@@ -246,6 +269,11 @@ export interface RedraShellApi {
   redo(): void;
   /** Undo/redo availability from the doc view, for the titlebar buttons. */
   onEditAvailability(cb: (state: EditAvailability) => void): void;
+  /** Titlebar tooltip over the document (window-content coords; main converts
+   *  y to doc-view space). Used only when a document is open; on the start
+   *  screen the shell draws its own tooltip (no doc view to clear). */
+  tipShow(info: TipInfo): void;
+  tipHide(): void;
   /** Find in the document (native findInPage on the doc view). */
   findStart(text: string): void;
   findNext(text: string, forward: boolean): void;

@@ -56,6 +56,8 @@ beforeAll(async () => {
     getRecents: () => Promise.resolve([]),
     undo: () => {},
     redo: () => {},
+    tipShow: () => {},
+    tipHide: () => {},
     togglePreview: () => {},
     save: () => Promise.resolve(),
     exportPdf: () => Promise.resolve(),
@@ -118,11 +120,18 @@ describe('titlebar undo/redo visibility', () => {
   });
 });
 
-describe('titlebar tooltips use the native title attribute', () => {
-  it('icon buttons carry a localized title (and matching aria-label), no data-tip', () => {
+describe('titlebar tooltips: custom pill, aria-label is the text source', () => {
+  it('icon buttons carry a localized aria-label and NO native title', () => {
     const open = id('btn-open');
-    expect(open.getAttribute('data-tip')).toBeNull();
-    expect(open.title.length).toBeGreaterThan(0);
-    expect(open.getAttribute('aria-label')).toBe(open.title);
+    // The hint lives in aria-label; native `title` is dead in the drag region,
+    // so we no longer set it (a left-over title would be a misleading no-op).
+    expect(open.getAttribute('aria-label')?.length ?? 0).toBeGreaterThan(0);
+    expect(open.title).toBe('');
+  });
+
+  it('mounts the start-screen tooltip pill, hidden until hover', () => {
+    const pill = document.getElementById('tb-tip');
+    expect(pill).not.toBeNull();
+    expect(pill!.classList.contains('visible')).toBe(false);
   });
 });

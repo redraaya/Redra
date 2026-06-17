@@ -67,8 +67,30 @@ export function revertSession(s: EditSessionState): void {
   s.el.innerHTML = s.originalHtml;
 }
 
-function endVisuals(el: HTMLElement): void {
+/** Tear down the editing affordances (contenteditable + red-edit class) while
+ *  leaving the content exactly as-is. Used on commit (the controller flushes a
+ *  final checkpoint, then ends the visuals) and by revertSession. */
+export function endVisuals(el: HTMLElement): void {
   el.removeAttribute('contenteditable');
   el.classList.remove('redra-editing-el');
   if (el.getAttribute('class') === '') el.removeAttribute('class');
+}
+
+/**
+ * Should an `input` event close Chromium's open typing group?
+ *
+ * Chromium coalesces a continuous typing run into ONE undo step — so a single
+ * ⌘Z wipes everything typed since the caret last moved, not one word. Pauses
+ * (even long ones) do NOT break the group; only a SELECTION CHANGE does. The
+ * controller fires a no-op selection touch on every word boundary to force the
+ * group closed, giving word-by-word undo. We only break on INSERTION
+ * boundaries — a typed space, or a new line/paragraph — so each word (with its
+ * trailing space) becomes its own undo step. Deletions and IME composition
+ * (`insertCompositionText`) are deliberately left untouched.
+ *
+ * Proven against real Chromium in scripts/undo-probe5.cjs.
+ */
+export function isUndoGroupBoundary(inputType: string, data: string | null): boolean {
+  if (inputType === 'insertParagraph' || inputType === 'insertLineBreak') return true;
+  return inputType === 'insertText' && data === ' ';
 }

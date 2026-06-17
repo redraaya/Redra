@@ -296,6 +296,31 @@ body {
   display: none;
 }
 
+/* Custom titlebar tooltip — the START-SCREEN pill (no doc view to clear, so the
+   shell draws it here). In document mode the doc view paints its own copy. The
+   pill is centred on the icon (translateX) and clamped on-screen by JS. */
+#tb-tip {
+  position: fixed;
+  display: none;
+  max-width: 280px;
+  padding: 3px 9px;
+  border-radius: 7px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 3px 10px rgba(20, 18, 14, 0.14);
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 30;
+}
+
+#tb-tip.visible {
+  display: block;
+}
+
 /* The UA sheet only hides [hidden] on HTML elements — SVG needs this rule. */
 .tb-btn svg[hidden] {
   display: none;

@@ -18,6 +18,7 @@ import type {
   OpPushResult,
   OpUndoResult,
   RedraDocBridge,
+  TipInfo,
 } from '../shared/ipc.js';
 
 // The doc view WebContents is REUSED across documents, but this preload
@@ -68,6 +69,11 @@ ipcRenderer.on('mode:set', (_event, state: ModeState) => {
 
 ipcRenderer.on('edit:undo', () => controller?.handleUndo());
 ipcRenderer.on('edit:redo', () => controller?.handleRedo());
+
+// Titlebar tooltip: the shell detected the hover and converted the icon's
+// position into this view's coordinates; we just draw it (over the document).
+ipcRenderer.on('tip:show', (_event, info: TipInfo) => controller?.showTip(info.text, info.x, info.y));
+ipcRenderer.on('tip:hide', () => controller?.hideTip());
 
 ipcRenderer.on('edit:commit', (_event, nonce: unknown) => {
   const reply = (): void => ipcRenderer.send('edit:committed', nonce);

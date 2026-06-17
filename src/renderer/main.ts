@@ -4,6 +4,7 @@ import { formatRelativeTime } from '../shared/relative-time';
 import { FindBarModel } from './find-bar';
 import type { FindCommand } from './find-bar';
 import { createNoticeToast } from './notice';
+import { initTitlebarTooltips } from './titlebar-tooltip';
 import './style.css';
 
 declare global {
@@ -55,14 +56,12 @@ const lang = pickLang(navigator.language);
 const t = makeT(lang);
 
 modePill.textContent = t('shell.modePreview');
-// Titlebar .tb-btn icons use the native `title` tooltip: Chromium draws it on a
-// top-level OS surface that floats over the document WebContentsView, whereas a
-// DOM tooltip in this shell renderer would be composited BEHIND the doc view
-// (everything below the 44px strip is). Native is slower (OS hover delay) but
-// reliable beats invisible. The SAME localized string is mirrored into
-// aria-label so the icon-only buttons keep an accessible name.
+// Titlebar icons carry their hint in `aria-label` ONLY — the native `title`
+// tooltip is dead here (the buttons sit in the window-drag region, which
+// suppresses Chromium's tooltip controller, so it shows nothing even on the
+// start screen). initTitlebarTooltips() draws our own pill and reads the text
+// straight from aria-label, so this stays the single localized source.
 const tipA11y = (btn: HTMLElement, text: string): void => {
-  btn.title = text;
   btn.setAttribute('aria-label', text);
 };
 tipA11y(btnPreview, t('shell.previewTooltip'));
@@ -71,12 +70,9 @@ tipA11y(btnRedo, t('shell.redoTooltip'));
 tipA11y(btnOpen, t('shell.openTooltip'));
 tipA11y(btnFind, t('shell.findTooltip'));
 findInput.placeholder = t('shell.findPlaceholder');
-findPrev.title = t('shell.findPrev');
-findPrev.setAttribute('aria-label', t('shell.findPrev'));
-findNext.title = t('shell.findNext');
-findNext.setAttribute('aria-label', t('shell.findNext'));
-findClose.title = t('shell.findClose');
-findClose.setAttribute('aria-label', t('shell.findClose'));
+tipA11y(findPrev, t('shell.findPrev'));
+tipA11y(findNext, t('shell.findNext'));
+tipA11y(findClose, t('shell.findClose'));
 tipA11y(btnPdf, t('shell.pdfTooltip'));
 tipA11y(btnSave, t('shell.saveTooltip'));
 dirtyDot.title = t('shell.dirtyTooltip');
@@ -107,9 +103,8 @@ function applyTheme(theme: Settings['shellTheme']): void {
   shellTheme = theme;
   if (theme === 'system') delete document.documentElement.dataset['theme'];
   else document.documentElement.dataset['theme'] = theme;
-  // The theme button's tooltip is dynamic (system/light/dark) — update its
-  // native `title` AND aria-label so both the OS tooltip and assistive tech
-  // reflect the current cycle position.
+  // The theme button's hint is dynamic (system/light/dark) — update its
+  // aria-label so both our tooltip and assistive tech reflect the cycle position.
   tipA11y(btnTheme, THEME_LABEL[theme]);
   for (const t of THEME_ORDER) {
     $(`theme-icon-${t}`).hidden = t !== theme;
@@ -123,6 +118,19 @@ btnTheme.addEventListener('click', () => {
 });
 
 void redra.getSettings().then((s) => applyTheme(s.shellTheme));
+
+// Custom titlebar tooltips (native `title` is dead in the drag region). Hover
+// detection lives here; the pill is drawn locally on the start screen and over
+// IPC by the doc view once a document is open. Tip text = each button's
+// aria-label. Only the titlebar icons — never the block handle or format bar.
+initTitlebarTooltips(
+  [btnOpen, btnFind, btnUndo, btnRedo, btnPreview, btnPdf, btnSave, btnTheme, findPrev, findNext, findClose],
+  {
+    isDocMode: () => document.body.dataset['state'] === 'doc',
+    showOverDoc: (info) => redra.tipShow(info),
+    hideOverDoc: () => redra.tipHide(),
+  },
+);
 
 // --- titlebar actions ---------------------------------------------------------
 

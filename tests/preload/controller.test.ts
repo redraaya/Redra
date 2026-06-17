@@ -98,26 +98,19 @@ describe('editor controller (jsdom)', () => {
     expect(a.getAttribute('contenteditable')).toBe('true');
     a.innerHTML = 'отредактировано';
 
-    // Capture B's state at the exact moment the op is pushed: the commit
-    // must land BEFORE a session opens on B.
-    let bEditableAtPush: boolean | null = null;
-    bridge.pushOp.mockImplementationOnce(async () => {
-      bEditableAtPush = b.hasAttribute('contenteditable');
-      return { ok: true as const };
-    });
-
     click(b);
     await flush();
 
+    // A's edit committed as one editText op (the final flush on commit); the
+    // FIFO transport guarantees it reaches main before any of B's ops.
     expect(bridge.pushOp).toHaveBeenCalledTimes(1);
     expect(bridge.pushOp).toHaveBeenCalledWith({
       type: 'editText',
       id: 'rA',
       html: 'отредактировано',
     });
-    expect(bEditableAtPush).toBe(false);
-    expect(a.hasAttribute('contenteditable')).toBe(false);
-    expect(b.getAttribute('contenteditable')).toBe('true');
+    expect(a.hasAttribute('contenteditable')).toBe(false); // A's session closed
+    expect(b.getAttribute('contenteditable')).toBe('true'); // B's session opened
   });
 
   it('Cmd/Ctrl+click on a link opens it externally and starts no session', () => {
@@ -157,25 +150,28 @@ describe('editor controller (jsdom)', () => {
     expect(el('a').hasAttribute('contenteditable')).toBe(false);
   });
 
-  // --- in-session undo routing (v0.3.5) -------------------------------------
-  // jsdom has no document.execCommand. We install a spy so we can assert the
-  // controller routes ⌘Z/⌘⇧Z through the NATIVE contenteditable undo stack
-  // while a session is active (where bold/italic/typing AND now the code
-  // toggle all live), and that a false return from it never throws.
+  // --- in-session undo routing (v0.4.x: single journal timeline) ------------
+  // The native-contenteditable undo tier is GONE. ⌘Z during a session
+  // materializes the in-flight tail as a real checkpoint and steps the JOURNAL.
+  // A spy proves execCommand('undo'|'redo') is never called anymore.
 
-  it('routes ⌘Z to native execCommand("undo") while a session is active', () => {
-    const exec = vi.fn(() => false); // "nothing to undo" — must not throw
+  it('⌘Z during a session checkpoints the tail and steps the journal (no execCommand)', async () => {
+    const exec = vi.fn(() => false);
     (document as unknown as { execCommand: typeof exec }).execCommand = exec;
     try {
       click(el('a')); // open a session
-      expect(el('a').getAttribute('contenteditable')).toBe('true');
+      el('a').innerHTML = 'отредактировано'; // a typed tail, not yet checkpointed
       controller.handleUndo();
+      expect(el('a').innerHTML).toBe('привет мир'); // reverted to pristine (live, sync)
+      await flush();
+      expect(exec).not.toHaveBeenCalledWith('undo'); // native undo path removed
+      expect(bridge.undo).toHaveBeenCalledTimes(1); // journal stepped instead
+
       controller.handleRedo();
-      expect(exec).toHaveBeenCalledWith('undo');
-      expect(exec).toHaveBeenCalledWith('redo');
-      // The journal-level bridge undo/redo must NOT fire during a session.
-      expect(bridge.undo).not.toHaveBeenCalled();
-      expect(bridge.redo).not.toHaveBeenCalled();
+      expect(el('a').innerHTML).toBe('отредактировано'); // re-applied
+      await flush();
+      expect(exec).not.toHaveBeenCalledWith('redo');
+      expect(bridge.redo).toHaveBeenCalledTimes(1);
     } finally {
       delete (document as { execCommand?: unknown }).execCommand;
     }

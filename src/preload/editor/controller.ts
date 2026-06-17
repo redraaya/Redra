@@ -1,11 +1,16 @@
-import { normalizeEditedHtml } from '../../engine/normalize.js';
+import {
+  normalizeEditedHtml,
+  HEAVY_STAMPED_ATTR_LIMIT,
+  stubHeavyStampedAttrs,
+} from '../../engine/normalize.js';
 import { REDRA_ID_ATTR } from '../../engine/types.js';
 import type { RedraDocBridge } from '../../shared/ipc.js';
 import { resolveEditable } from './editable.js';
 import { resolveBlock } from './blocks.js';
-import { beginSession, commitSession, revertSession } from './session.js';
+import { beginSession, revertSession, endVisuals, isUndoGroupBoundary } from './session.js';
 import type { EditSessionState, Normalize } from './session.js';
 import { LocalHistory } from './history.js';
+import type { HistoryEntry } from './history.js';
 import { HANDLE_REACH, Overlay } from './overlay.js';
 import { startDrag } from './drag.js';
 import { computeInlineToggle, toggleInlineTag } from './format.js';
@@ -29,6 +34,11 @@ export interface EditorController {
   handleUndo(): void;
   /** Cmd+Shift+Z routed from the menu. */
   handleRedo(): void;
+  /** Show the titlebar tooltip over the document (the shell drives hover; the
+   *  doc view draws it so it clears this view, which composites over the shell
+   *  strip). x,y are in this view's coordinates. */
+  showTip(text: string, x: number, y: number): void;
+  hideTip(): void;
   destroy(): void;
 }
 
@@ -47,6 +57,18 @@ export function createEditorController(
   let repositionQueued = false;
   let destroyed = false;
 
+  // --- single undo timeline: per-edit journal checkpoints --------------------
+  // There is ONE undo timeline — the main journal mirrored by `history`. A text
+  // session no longer commits as one big editText op; instead it cuts a
+  // CHECKPOINT (one history entry + one editText op carrying the block's
+  // cumulative innerHTML) at each edit boundary (typed space / Enter / a format
+  // / a click to a new spot / commit). So ⌘Z steps per edit, not per block.
+  // These track the last checkpoint's state for the OPEN session only.
+  let cpHtml = ''; // stamped innerHTML at the last checkpoint
+  let cpNormalized = ''; // normalize(cpHtml)
+  let pushedThisSession = 0; // checkpoints emitted in the current session (floor 0)
+  let dirtyTail = false; // content changed since the last checkpoint (drives canUndo)
+
   const overlay = new Overlay(doc, {
     onDelete: () => deleteBlockAction(),
     onDuplicate: () => duplicateBlockAction(),
@@ -63,8 +85,8 @@ export function createEditorController(
           if (!id || !parent) return;
           const oldNext = moved.nextSibling;
           parent.insertBefore(moved, beforeEl);
-          history.push({ kind: 'moveBlock', node: moved, parent, oldNext, newNext: moved.nextSibling });
-          void pushOp({ type: 'moveBlock', id, beforeId });
+          const entry = history.push({ kind: 'moveBlock', node: moved, parent, oldNext, newNext: moved.nextSibling });
+          void pushOp({ type: 'moveBlock', id, beforeId }, entry);
         },
         onEnd: () => {
           dragging = false;
@@ -88,18 +110,22 @@ export function createEditorController(
   // --- undo/redo availability (titlebar buttons) ----------------------------
 
   /**
-   * Push the current undo/redo availability to the shell (via main). Both
-   * canUndo and canRedo are true while an edit session is open — its native
-   * contenteditable stack is independently undoable/redoable, and handleUndo/
-   * handleRedo route to execCommand('undo'|'redo') in the session branch, so
-   * the buttons must stay live to reach it. Emitted on every transition:
-   * after pushOp, after handleUndo/handleRedo, and on session begin/end.
+   * Push the current undo/redo availability to the shell (via main). There is
+   * ONE timeline now (the journal mirrored by `history`):
+   *   canRedo = history.canRedo — true ONLY after an undo, cleared by any new
+   *     edit (push() truncates the redo tail). So Redo is hidden the instant you
+   *     click into a block and appears only once you've actually undone something.
+   *   canUndo = history.canUndo OR the open session has an un-checkpointed tail
+   *     (dirtyTail) — so Undo appears the moment you change something, but NOT on
+   *     a bare click-in with nothing typed yet.
+   * Emitted on every transition: after a checkpoint, after handleUndo/Redo, on
+   * session begin/end, and on the first keystroke of a session.
    */
   let lastCanUndo: boolean | null = null;
   let lastCanRedo: boolean | null = null;
   function emitAvailability(): void {
-    const canUndo = history.canUndo || !!session;
-    const canRedo = history.canRedo || !!session;
+    const canUndo = history.canUndo || dirtyTail;
+    const canRedo = history.canRedo;
     if (canUndo === lastCanUndo && canRedo === lastCanRedo) return;
     lastCanUndo = canUndo;
     lastCanRedo = canRedo;
@@ -108,20 +134,104 @@ export function createEditorController(
 
   // --- op transport ---------------------------------------------------------
 
-  async function pushOp(op: Parameters<RedraDocBridge['pushOp']>[0]): Promise<void> {
+  // Single-flight FIFO so every journal-mutating IPC (push/undo/redo) reaches
+  // main strictly in enqueue order, each awaiting the prior. Without it a burst
+  // (N checkpoints then N undos in one synchronous tick) could land out of
+  // order and desync the main journal cursor from the local stack. A failed
+  // task never breaks the chain (errors are swallowed for ordering only).
+  let opChain: Promise<unknown> = Promise.resolve();
+  function enqueue(task: () => Promise<void>): Promise<void> {
+    const run = opChain.catch(() => {}).then(task);
+    opChain = run.catch(() => {});
+    return run;
+  }
+
+  function pushOp(
+    op: Parameters<RedraDocBridge['pushOp']>[0],
+    entry: HistoryEntry,
+    onReject?: () => void,
+  ): Promise<void> {
+    return enqueue(() => pushOpCore(op, entry, onReject));
+  }
+
+  async function pushOpCore(
+    op: Parameters<RedraDocBridge['pushOp']>[0],
+    entry: HistoryEntry,
+    onReject?: () => void,
+  ): Promise<void> {
     const res = await bridge.pushOp(op);
     if (!res.ok) {
-      // Main is the source of truth: the journal never recorded this op, so
-      // the matching local entry (pushed just before this call) must go too —
-      // revert the DOM via its stored inverse and drop it from the stack.
-      // The action visibly bounces back; main's localized userMessage (when
-      // present — stale-doc rejections stay silent) becomes a shell toast so
-      // the bounce is never a mystery.
+      // Main is the source of truth: the journal never recorded this op, so the
+      // local entry it created must go too — by IDENTITY, because under the FIFO
+      // transport this rejection may resolve after a LATER sync push already
+      // landed on top (popping the top would corrupt the stack). discardEntry
+      // reverts the DOM where safe so the action visibly bounces back; main's
+      // localized userMessage (stale-doc rejections stay silent) becomes a toast.
       console.error('[redra] ops:push rejected:', res.error, op);
-      history.undoAndDiscard();
+      history.discardEntry(entry);
+      // A checkpoint push also moved controller-local state (pushedThisSession,
+      // cpHtml/cpNormalized) the generic history rollback doesn't know about —
+      // the caller reverses exactly that, keeping the session's undo accounting
+      // in lockstep with the journal that recorded nothing.
+      onReject?.();
       if (res.userMessage) bridge.notifyRejected(res.userMessage);
     }
     emitAvailability(); // a push (or its rollback) changed the history stack
+  }
+
+  /** Journal undo/redo, serialized through the FIFO so they never overtake a
+   *  still-in-flight push (the burst-desync the queue exists to prevent). */
+  function queuedUndo(): Promise<void> {
+    return enqueue(async () => {
+      const res = await bridge.undo();
+      if (!res.ok) console.error('[redra] undo desync: journal had nothing to undo');
+    });
+  }
+  function queuedRedo(): Promise<void> {
+    return enqueue(async () => {
+      const res = await bridge.redo();
+      if (!res.ok) console.error('[redra] redo desync: journal had nothing to redo');
+    });
+  }
+
+  /**
+   * Cut one undo checkpoint for the open session: a history entry + an editText
+   * op carrying the block's CUMULATIVE stamped innerHTML (prevHtml = the last
+   * checkpoint, newHtml = now). A no-op (normalized content unchanged since the
+   * last checkpoint) emits nothing — so a trailing space that doesn't change the
+   * text makes no empty step. Re-editText on the block's OWN pristine id is
+   * engine-legal ("re-editText replaces the replacement", op-guard contract).
+   * Reads el/id off the passed session so the final flush still works after the
+   * global `session` was nulled at the top of endSession.
+   */
+  function flushCheckpoint(s: EditSessionState): boolean {
+    const cur = s.el.innerHTML;
+    const curN = normalize(cur);
+    const changed = curN !== cpNormalized;
+    if (changed) {
+      // Snapshot the pre-checkpoint baseline so a rejected push can reverse
+      // the controller-local accounting in lockstep with history.undoAndDiscard
+      // (which reverts the newest entry — this very checkpoint). pushOpCore
+      // guarantees onReject runs only for THIS op's rejection.
+      const prevHtml = cpHtml;
+      const prevNormalized = cpNormalized;
+      const entry = history.push({ kind: 'editText', el: s.el, prevHtml, newHtml: cur });
+      pushedThisSession++;
+      cpHtml = cur;
+      cpNormalized = curN;
+      const wire = curN.length > HEAVY_STAMPED_ATTR_LIMIT ? stubHeavyStampedAttrs(curN) : curN;
+      void pushOp({ type: 'editText', id: s.id, html: wire }, entry, () => {
+        // Main rejected this checkpoint: discardEntry already dropped the entry.
+        // Roll the session's own counters back to the pre-checkpoint baseline so
+        // endSession/handleUndo never send a bridge.undo the journal can't match.
+        pushedThisSession = Math.max(0, pushedThisSession - 1);
+        cpHtml = prevHtml;
+        cpNormalized = prevNormalized;
+      });
+    }
+    dirtyTail = false; // the tail is sealed (whether or not it changed anything)
+    emitAvailability();
+    return changed;
   }
 
   // --- image replacement (v0.2.0) -------------------------------------------
@@ -139,8 +249,8 @@ export function createEditorController(
   function applyImageValue(img: HTMLElement, id: string, value: string): void {
     const prevValue = img.getAttribute('src');
     img.setAttribute('src', value);
-    history.push({ kind: 'setAttr', el: img, name: 'src', prevValue, newValue: value });
-    void pushOp({ type: 'setAttr', id, name: 'src', value });
+    const entry = history.push({ kind: 'setAttr', el: img, name: 'src', prevValue, newValue: value });
+    void pushOp({ type: 'setAttr', id, name: 'src', value }, entry);
   }
 
   async function replaceImageViaPick(img: HTMLElement): Promise<void> {
@@ -226,6 +336,12 @@ export function createEditorController(
 
   function handleToolbarAction(action: ToolbarAction, value?: string): void {
     if (!session) return;
+    // Seal the typed tail as its OWN step before the format, then the format as
+    // its own step after — so ⌘Z peels format → typing in chronological order
+    // (native undo no longer carries this; checkpoints do). A no-op format
+    // (empty link, unlink-with-no-link) flushes to nothing via the equality
+    // guard, so no spurious empty steps.
+    flushCheckpoint(session);
     switch (action) {
       case 'bold':
         doc.execCommand?.('bold');
@@ -270,6 +386,7 @@ export function createEditorController(
         break;
     }
     queueToolbarUpdate(); // reflect the new state on the buttons
+    if (session) flushCheckpoint(session); // seal the format as its own step
   }
 
   // --- edit sessions (A1) ----------------------------------------------------
@@ -287,36 +404,76 @@ export function createEditorController(
     // refreshHoverUnderPointer are dormant during a session, so this handle is
     // the only block UI on screen; no OTHER block can highlight.
     overlay.showHandle(el);
-    el.addEventListener('input', queueReposition);
+    el.addEventListener('input', onSessionInput);
+    // Seed the checkpoint baseline at the pristine content; no checkpoint is
+    // cut on a bare click-in, so Undo/Redo stay hidden until the user edits.
+    cpHtml = s.originalHtml;
+    cpNormalized = s.originalNormalized;
+    pushedThisSession = 0;
+    dirtyTail = false;
     emitAvailability();
+  }
+
+  /**
+   * Per-keystroke work during a session: keep the handle anchored as the box
+   * grows; mark the tail dirty (so Undo appears the moment you change
+   * something); and at a word/line boundary cut an undo CHECKPOINT so ⌘Z steps
+   * per edit. The boundary also gets the no-op selection touch (harmless;
+   * preserves IME/caret continuity) before the checkpoint is flushed.
+   */
+  function onSessionInput(e: Event): void {
+    if (!session) return;
+    if (!dirtyTail) {
+      dirtyTail = true;
+      emitAvailability(); // first change in this segment — reveal Undo
+    }
+    const ie = e as InputEvent;
+    if (isUndoGroupBoundary(ie.inputType, ie.data)) {
+      const sel = win.getSelection?.();
+      if (sel && sel.rangeCount > 0) {
+        const r = sel.getRangeAt(0).cloneRange();
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+      flushCheckpoint(session);
+    }
+    queueReposition();
   }
 
   async function endSession(commit: boolean): Promise<void> {
     const s = session;
     if (!s) return;
+    const n = Math.max(0, pushedThisSession); // capture before any reset
     session = null; // cleared first: the blur this triggers must be a no-op
     lastSelectionRange = null;
     overlay.toolbar.hide();
-    s.el.removeEventListener('input', queueReposition);
+    s.el.removeEventListener('input', onSessionInput);
     overlay.hideHandle(); // drop the session anchor; hover takes over again
     if (!commit) {
+      // Escape / trash mid-edit: undo EVERY checkpoint this session pushed,
+      // then restore the pristine innerHTML — nets zero ops, leaves no redo
+      // tail, keeps the local stack and the journal cursor in lockstep.
+      for (let i = 0; i < n; i++) {
+        history.undoAndDiscard();
+        void queuedUndo();
+      }
+      pushedThisSession = 0;
+      dirtyTail = false;
       revertSession(s);
-      emitAvailability(); // session is gone — canUndo may have dropped
+      emitAvailability();
       return;
     }
-    const result = commitSession(s, normalize);
-    if (!result) {
-      emitAvailability(); // unchanged — no op, but the session still ended
-      return;
-    }
-    history.push({
-      kind: 'editText',
-      el: s.el,
-      prevHtml: result.prevHtml,
-      newHtml: result.newHtml,
-    });
-    emitAvailability(); // history grew AND the session ended
-    await pushOp(result.op);
+    // Commit = ONE final flush capturing the tail typed since the last
+    // boundary, then tear down the editing affordances. No separate
+    // single-editText commit anymore. Await the queue so the commit barrier
+    // (commitActive/duplicate .then(), main's edit:committed ack) still fires
+    // only after the editText is journaled.
+    flushCheckpoint(s);
+    endVisuals(s.el);
+    pushedThisSession = 0;
+    dirtyTail = false;
+    emitAvailability();
+    await opChain;
   }
 
   /**
@@ -355,6 +512,18 @@ export function createEditorController(
     range.collapse(true);
     sel.removeAllRanges();
     sel.addRange(range);
+  }
+
+  /**
+   * After a mid-session undo/redo swaps el.innerHTML, the live Range is
+   * detached — re-place the caret at the END of the (reverted) content. End is
+   * the safe, deterministic choice across Chromium and jsdom (placeCaret with
+   * no x/y collapses to end); mapping the exact pre-undo offset across the
+   * innerHTML swap is deferred (see the undo-checkpoint probe).
+   */
+  function replaceCaretAtEnd(el: HTMLElement): void {
+    el.focus({ preventScroll: true });
+    placeCaret(el);
   }
 
   // --- block hover + delete (A2) ----------------------------------------------
@@ -422,9 +591,7 @@ export function createEditorController(
       // top-of-journal at this point, so one bridge.undo() rolls it back.
       const undoJournaledClone = (why: string): void => {
         console.warn(`[redra] cloneBlock: ${why} — undoing the journaled op`);
-        void bridge.undo().then((r) => {
-          if (!r.ok) console.error('[redra] cloneBlock rollback desync: journal had nothing to undo');
-        });
+        void queuedUndo();
       };
       if (!block.isConnected) {
         undoJournaledClone('block left the DOM mid-invoke');
@@ -446,10 +613,10 @@ export function createEditorController(
     const parent = block.parentNode as (Node & ParentNode) | null;
     if (!id || !parent) return;
     clearHover();
-    history.push({ kind: 'deleteBlock', node: block, parent, nextSibling: block.nextSibling });
+    const entry = history.push({ kind: 'deleteBlock', node: block, parent, nextSibling: block.nextSibling });
     block.remove();
     emitAvailability();
-    void pushOp({ type: 'deleteBlock', id });
+    void pushOp({ type: 'deleteBlock', id }, entry);
   }
 
   // --- handle-pill actions (hover OR active-session block) -------------------
@@ -516,8 +683,11 @@ export function createEditorController(
     }
 
     // Clicks inside the active session: native caret behaviour, but the
-    // page's own handlers stay suppressed.
+    // page's own handlers stay suppressed. Clicking to a NEW spot seals the
+    // edits made at the old spot as their own undo step — so fixing three
+    // places in one block gives three undo steps even without typed spaces.
     if (session && session.el.contains(target)) {
+      flushCheckpoint(session);
       e.stopImmediatePropagation();
       return;
     }
@@ -703,29 +873,64 @@ export function createEditorController(
       return endSession(true);
     },
     handleUndo(): void {
+      // ONE timeline — always the journal. While a session is open, first
+      // materialize the in-flight tail as a real checkpoint so a half-typed
+      // word is undoable, then step the journal.
       if (session) {
-        // Native contenteditable undo within the session.
-        doc.execCommand?.('undo');
-        return;
+        flushCheckpoint(session);
+        // Cross-block guard: never revert a PRIOR block under the live caret.
+        // When this session has no more of its own checkpoints to undo, commit
+        // it; the NEXT ⌘Z then takes the post-commit path for the prior block.
+        if (pushedThisSession <= 0) {
+          void endSession(true);
+          return;
+        }
       }
       if (!history.canUndo) return;
       history.undo();
+      void queuedUndo();
+      if (session) {
+        // We reverted one of THIS session's checkpoints — re-sync the baseline
+        // so continued typing re-segments and the commit never double-counts.
+        pushedThisSession = Math.max(0, pushedThisSession - 1);
+        cpHtml = session.el.innerHTML;
+        cpNormalized = normalize(cpHtml);
+        dirtyTail = false;
+        replaceCaretAtEnd(session.el);
+      }
       emitAvailability();
-      void bridge.undo().then((res) => {
-        if (!res.ok) console.error('[redra] undo desync: journal had nothing to undo');
-      });
     },
     handleRedo(): void {
-      if (session) {
-        doc.execCommand?.('redo');
-        return;
-      }
       if (!history.canRedo) return;
+      // Cross-block guard (mirror of handleUndo): while a session is open, a
+      // redo may ONLY re-apply one of THIS session's own checkpoints. A stale
+      // redo tail left by a PRIOR committed block must never re-apply under the
+      // live caret — that would resurrect the prior block's edit and poison this
+      // session's checkpoint accounting (a later Escape would then silently
+      // revert the prior block + desync the journal). The next redo entry
+      // belongs to this session iff it targets session.el.
+      if (session) {
+        const next = history.nextRedo;
+        if (!(next && next.kind === 'editText' && next.el === session.el)) return;
+      }
       history.redo();
+      void queuedRedo();
+      if (session) {
+        // Mid-session redo re-applied one of this session's checkpoints.
+        pushedThisSession++;
+        cpHtml = session.el.innerHTML;
+        cpNormalized = normalize(cpHtml);
+        dirtyTail = false;
+        replaceCaretAtEnd(session.el);
+      }
       emitAvailability();
-      void bridge.redo().then((res) => {
-        if (!res.ok) console.error('[redra] redo desync: journal had nothing to redo');
-      });
+    },
+    showTip(text: string, x: number, y: number): void {
+      if (destroyed) return;
+      overlay.showTip(text, x, y);
+    },
+    hideTip(): void {
+      overlay.hideTip();
     },
     destroy(): void {
       if (destroyed) return;

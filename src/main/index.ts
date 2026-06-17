@@ -857,6 +857,21 @@ function registerIpc(): void {
   ipcMain.on('edit:redo', (event) => {
     shellCtx(event)?.docView?.webContents.send('edit:redo');
   });
+  // Titlebar tooltip: the shell detected the hover and sends the icon's centre
+  // (x) and the pill's top in WINDOW-content coords; relay to the sender's doc
+  // view in ITS coordinate space (y minus the strip height) so it draws just
+  // below the strip, over the document. Trust only numbers + a short string.
+  ipcMain.on('tip:show', (event, info: unknown) => {
+    const wc = shellCtx(event)?.docView?.webContents;
+    if (!wc || wc.isDestroyed()) return;
+    if (typeof info !== 'object' || info === null) return;
+    const { text, x, y } = info as Record<string, unknown>;
+    if (typeof text !== 'string' || typeof x !== 'number' || typeof y !== 'number') return;
+    wc.send('tip:show', { text: text.slice(0, 200), x, y: y - SHELL_STRIP_HEIGHT });
+  });
+  ipcMain.on('tip:hide', (event) => {
+    shellCtx(event)?.docView?.webContents.send('tip:hide');
+  });
   // --- find in document (⌘F, v0.3.0) ---
   // The bar lives in the shell, the search runs on that window's DOC view.
   // NB Electron semantics: findNext:true BEGINS a session, false steps it.

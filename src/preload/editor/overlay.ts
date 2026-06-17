@@ -92,6 +92,29 @@ const SHADOW_CSS = `
 }
 .img-chip.visible { display: flex; }
 .img-chip:hover { color: #1c1b19; }
+/* Titlebar tooltip, drawn HERE (not in the shell) so it clears the doc view:
+   the shell strip's native tooltips are dead (the window-drag region kills
+   them), and a shell-DOM tooltip below y=44 is composited behind this view.
+   The shell drives hover detection and feeds text + position over IPC. */
+.tb-tip {
+  position: fixed;
+  display: none;
+  max-width: 280px;
+  padding: 3px 9px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(28, 27, 25, 0.09);
+  box-shadow: 0 3px 10px rgba(20, 18, 14, 0.14);
+  color: #1c1b19;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 2;
+}
+.tb-tip.visible { display: block; }
 @media (prefers-color-scheme: dark) {
   .handle {
     background: rgba(35, 34, 32, 0.95);
@@ -106,12 +129,17 @@ const SHADOW_CSS = `
     color: #8f8c84;
   }
   .img-chip:hover { color: #eceae6; }
+  .tb-tip {
+    background: rgba(35, 34, 32, 0.97);
+    border-color: rgba(236, 234, 230, 0.12);
+    color: #eceae6;
+  }
 }
 /* printToPDF renders print styles — editor chrome must never reach a PDF.
    (The drag ghost lives OUTSIDE the shadow and cannot exist during export:
    exportPdf commits the edit session first and no drag survives that.) */
 @media print {
-  .handle, .indicator, .img-chip { display: none !important; }
+  .handle, .indicator, .img-chip, .tb-tip { display: none !important; }
 }
 `;
 
@@ -152,6 +180,8 @@ export class Overlay {
   private readonly handle: HTMLElement;
   private readonly indicator: HTMLElement;
   private readonly imgChip: HTMLElement;
+  /** Titlebar tooltip — positioned/filled by the shell over IPC (see showTip). */
+  private readonly tip: HTMLElement;
   /** Inline-formatting toolbar (Feature 3) — shown/hidden by the controller. */
   readonly toolbar: SelectionToolbar;
   private ghost: HTMLElement | null = null;
@@ -222,7 +252,31 @@ export class Overlay {
     this.imgChip.addEventListener('click', () => callbacks.onImageReplace());
     root.appendChild(this.imgChip);
 
+    this.tip = doc.createElement('div');
+    this.tip.className = 'tb-tip';
+    this.tip.setAttribute('aria-hidden', 'true');
+    root.appendChild(this.tip);
+
     doc.documentElement.appendChild(this.host);
+  }
+
+  /**
+   * Show the titlebar tooltip at (x, y) in THIS view's coordinates (the shell
+   * already converted from window to doc-view space). x is the icon's centre;
+   * the pill is centred on it (translateX -50%) and clamped to stay on-screen.
+   */
+  showTip(text: string, x: number, y: number): void {
+    this.tip.textContent = text;
+    this.tip.classList.add('visible');
+    const half = this.tip.offsetWidth / 2;
+    const vw = this.doc.documentElement.clientWidth;
+    const cx = Math.max(half + 6, Math.min(x, vw - half - 6));
+    this.tip.style.left = `${cx}px`;
+    this.tip.style.top = `${y}px`;
+  }
+
+  hideTip(): void {
+    this.tip.classList.remove('visible');
   }
 
   /** True when the (retargeted) event landed on overlay chrome. */

@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { normalizeEditedHtml } from '../../src/engine/normalize.js';
-import { beginSession, commitSession, revertSession } from '../../src/preload/editor/session.js';
+import {
+  beginSession,
+  commitSession,
+  revertSession,
+  isUndoGroupBoundary,
+} from '../../src/preload/editor/session.js';
 
 function mountP(inner: string): HTMLElement {
   document.body.innerHTML = `<p data-redra-id="r5">${inner}</p>`;
@@ -63,6 +68,23 @@ describe('edit session commit pipeline', () => {
     // …while the live DOM and the local inverse stack keep the real value.
     expect(p.innerHTML).toContain(big);
     expect(result.newHtml).toContain(big);
+  });
+
+  // Word-by-word undo (see isUndoGroupBoundary): break Chromium's typing group
+  // on insertion word boundaries only, so each word becomes its own undo step.
+  it('breaks the undo group on a typed space and on Enter, not mid-word', () => {
+    expect(isUndoGroupBoundary('insertText', ' ')).toBe(true);
+    expect(isUndoGroupBoundary('insertParagraph', null)).toBe(true);
+    expect(isUndoGroupBoundary('insertLineBreak', null)).toBe(true);
+
+    // mid-word characters keep the group open (so a word undoes as one unit)
+    expect(isUndoGroupBoundary('insertText', 'a')).toBe(false);
+    expect(isUndoGroupBoundary('insertText', '.')).toBe(false);
+    // deletions and IME composition are left untouched
+    expect(isUndoGroupBoundary('deleteContentBackward', null)).toBe(false);
+    expect(isUndoGroupBoundary('insertCompositionText', ' ')).toBe(false);
+    // a pasted chunk containing a space is one unit, not a boundary
+    expect(isUndoGroupBoundary('insertFromPaste', 'a b')).toBe(false);
   });
 
   it('Escape revert restores the EXACT pre-session innerHTML', () => {
