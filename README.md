@@ -12,6 +12,13 @@ disk. No code, no broken layout. Or export it to PDF.
 
 ![Redra features](docs/assets/features.png)
 
+**New in v0.4.1:**
+
+- **Pinned block handle** — click a block and its handle (move · duplicate ·
+  delete) stays put, even when blocks sit in a row and the pointer has to
+  cross a neighbour to reach the icons. Click empty space or press Esc to
+  release; clicking another block moves the pin there. Hover works as before.
+
 **New in v0.4.0:**
 
 - **Edit-by-edit undo** — ⌘Z steps back one edit at a time (a word, a line, a
