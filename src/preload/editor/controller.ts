@@ -53,6 +53,12 @@ export function createEditorController(
   let editing = false;
   let session: EditSessionState | null = null;
   let hoverBlock: HTMLElement | null = null;
+  /** Block whose handle was PINNED by a click (field bug: in row layouts the
+   *  trip to the pill crosses a SIBLING block, which steals the hover and
+   *  hides the pill). While set, hover no longer moves the handle; the pin
+   *  drops on a click over empty space / another block, Escape, a text
+   *  session, a drag or a delete. */
+  let pinnedBlock: HTMLElement | null = null;
   let dragging = false;
   let repositionQueued = false;
   let destroyed = false;
@@ -90,6 +96,7 @@ export function createEditorController(
         },
         onEnd: () => {
           dragging = false;
+          pinnedBlock = null; // the drop moved the block — hover takes over again
           clearHover();
         },
       });
@@ -392,6 +399,7 @@ export function createEditorController(
   // --- edit sessions (A1) ----------------------------------------------------
 
   function startSession(el: HTMLElement, clickX?: number, clickY?: number): void {
+    pinnedBlock = null; // a text session supersedes a click-pin
     clearHover();
     const s = beginSession(el, normalize);
     if (!s) return;
@@ -565,6 +573,14 @@ export function createEditorController(
     overlay.showHandle(block);
   }
 
+  /** Pin the handle to a clicked block (null / page wrapper = unpin). The
+   *  visual state is the same hover wash + pill — it just stops following
+   *  the mouse until the next click decides otherwise. */
+  function pinBlock(block: HTMLElement | null): void {
+    pinnedBlock = block && !isPageWrapper(block) ? block : null;
+    setHover(pinnedBlock);
+  }
+
   /**
    * Block duplication: unlike other ops the journal push happens in MAIN
    * inside the one 'ops:cloneBlock' invoke (it mints the cloneId), so the
@@ -612,6 +628,7 @@ export function createEditorController(
     const id = block.getAttribute(REDRA_ID_ATTR);
     const parent = block.parentNode as (Node & ParentNode) | null;
     if (!id || !parent) return;
+    pinnedBlock = null; // the pinned block (if any) is about to vanish
     clearHover();
     const entry = history.push({ kind: 'deleteBlock', node: block, parent, nextSibling: block.nextSibling });
     block.remove();
@@ -708,7 +725,14 @@ export function createEditorController(
     const editable = resolveEditable(target);
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (editable) startSession(editable, e.clientX, e.clientY);
+    if (editable) {
+      startSession(editable, e.clientX, e.clientY);
+      return;
+    }
+    // Non-editable click: pin the handle to the clicked block, or unpin on
+    // empty space. A pinned pill survives the pointer crossing sibling blocks
+    // on its way to the icons — the row-layout case hover alone can't serve.
+    pinBlock(resolveBlock(target, win));
   }
 
   /** Last known pointer position — lets scroll/resize re-evaluate hover for
@@ -726,6 +750,14 @@ export function createEditorController(
     const target = asElement(e.target);
     if (!target) return;
     if (overlay.containsTarget(target)) return; // hovering the pill/chip keeps it alive
+    if (pinnedBlock) {
+      // The pill is pinned by a click — hover must not move it. The image
+      // chip is a separate affordance ON the img itself, so it keeps working.
+      const img = asReplaceableImage(target);
+      if (img) overlay.showImageChip(img);
+      else overlay.hideImageChip();
+      return;
+    }
     applyHoverTarget(target, e.clientX, e.clientY);
   }
 
@@ -770,7 +802,9 @@ export function createEditorController(
 
   /** Re-run hover for the element under the stationary pointer (scroll/resize). */
   function refreshHoverUnderPointer(): void {
-    if (session || dragging || !lastPointer) return;
+    // A pinned pill must not be stolen by whatever scrolls under the pointer —
+    // reposition() already keeps it glued to the pinned block's new rect.
+    if (session || dragging || pinnedBlock || !lastPointer) return;
     const fromPoint = (doc as { elementFromPoint?: (x: number, y: number) => Element | null })
       .elementFromPoint;
     if (typeof fromPoint !== 'function') return;
@@ -792,17 +826,26 @@ export function createEditorController(
   }
 
   function onMouseOut(e: MouseEvent): void {
-    // Pointer left the window entirely.
-    if (e.relatedTarget === null && !dragging) setHover(null);
+    // Pointer left the window entirely. A pinned pill stays — it only drops
+    // on an explicit click (or Escape), never because the mouse wandered.
+    if (e.relatedTarget === null && !dragging && !pinnedBlock) setHover(null);
   }
 
   function onKeyDown(e: KeyboardEvent): void {
     // Keys typed into overlay chrome (the link input) are the toolbar's own.
     if (overlay.containsTarget(e.target)) return;
-    if (e.key !== 'Escape' || !session) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    void endSession(false); // Escape REVERTS — no op recorded
+    if (e.key !== 'Escape') return;
+    if (session) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void endSession(false); // Escape REVERTS — no op recorded
+      return;
+    }
+    if (pinnedBlock) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      pinBlock(null); // Escape drops the click-pin
+    }
   }
 
   function onFocusOut(e: FocusEvent): void {
@@ -865,6 +908,7 @@ export function createEditorController(
         // Main commits the session before flipping the mode; this is the
         // belt-and-braces path for a commit that raced or timed out.
         void endSession(true);
+        pinnedBlock = null;
         clearHover();
         disarm();
       }
@@ -938,6 +982,7 @@ export function createEditorController(
       if (editing) disarm();
       editing = false;
       session = null;
+      pinnedBlock = null;
       clearHover();
       overlay.destroy();
     },
