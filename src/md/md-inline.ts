@@ -75,16 +75,23 @@ function findMarkers(raw: string, value: string): MarkerHit[] | null {
   return j === value.length ? hits : null;
 }
 
-/** Pair same-kind markers left-to-right; drop pairs with empty content or
- *  pairs overlapping an earlier accepted pair. */
-function pairMarkers(hits: MarkerHit[]): Array<{ kind: 'spoiler' | 'mark'; from: number; to: number }> {
+/** Pair same-kind markers left-to-right. A pair is dropped when its content
+ *  is empty, when it OVERLAPS an earlier accepted pair, or when the content
+ *  starts/ends with whitespace (flanking rule, mirroring emphasis: the loose
+ *  "a == b == c" stays literal text — matching what a reader expects). */
+function pairMarkers(
+  hits: MarkerHit[],
+  value: string,
+): Array<{ kind: 'spoiler' | 'mark'; from: number; to: number }> {
   const pairs: Array<{ kind: 'spoiler' | 'mark'; from: number; to: number }> = [];
   for (const kind of ['spoiler', 'mark'] as const) {
     const ofKind = hits.filter((h) => h.kind === kind);
     for (let k = 0; k + 1 < ofKind.length; k += 2) {
       const from = ofKind[k]!.valueIndex;
       const to = ofKind[k + 1]!.valueIndex;
-      if (to - from <= 2) continue; // ||…|| with empty content stays literal
+      if (to - from <= 2) continue; // empty content stays literal
+      const inner = value.slice(from + 2, to);
+      if (/^\s|\s$/.test(inner)) continue; // flanking: no edge whitespace
       pairs.push({ kind, from, to });
     }
   }
@@ -146,7 +153,7 @@ export function applyInlinePasses(tree: MdastRoot, source: string): void {
       ) {
         const raw = source.slice(child.position.start.offset, child.position.end.offset);
         const hits = findMarkers(raw, child.value);
-        const pairs = hits ? pairMarkers(hits) : [];
+        const pairs = hits ? pairMarkers(hits, child.value) : [];
         if (pairs.length > 0) {
           next.push(...splitValue(child.value, pairs));
           changed = true;

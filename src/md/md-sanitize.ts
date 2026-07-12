@@ -83,6 +83,12 @@ function filterAttrs(el: P5Element): void {
   el.attrs = kept;
 }
 
+/** Raw-html inline aliases are canonicalized to the vocabulary the renderer
+ *  itself emits — so the writer speaks ONE dialect (<b> and <strong> would
+ *  otherwise round-trip to different DOM). The file's bytes are untouched:
+ *  this only shapes the DERIVED view. */
+const CANONICAL_TAG: Record<string, string> = { b: 'strong', i: 'em', del: 's', ins: 'u' };
+
 /** Walk + prune in place. Returns true when the subtree contains an element
  *  outside EDIT_SAFE (⇒ enclosing island must go read-only). */
 function sanitizeNode(node: P5Parent): boolean {
@@ -94,6 +100,11 @@ function sanitizeNode(node: P5Parent): boolean {
     if (DROP_TAGS.has(child.tagName)) {
       children.splice(i, 1);
       continue;
+    }
+    const canonical = CANONICAL_TAG[child.tagName];
+    if (canonical) {
+      (child as { tagName: string }).tagName = canonical;
+      (child as { nodeName: string }).nodeName = canonical;
     }
     filterAttrs(child);
     const childUnsafe = sanitizeNode(child as P5Parent);
@@ -142,8 +153,24 @@ function subtreeUnsafe(node: P5Parent): boolean {
   return false;
 }
 
-/** Pre-strip data-redra-* from RAW html node values before they ever meet
- *  the parser — a .md file must not be able to forge stamps. */
+/**
+ * Strip EVERY data-redra-* attribute from raw HTML that came from the .md
+ * file so it can never forge a stamp (id collision) or an island/readonly
+ * marker. Runs on raw html node VALUES before they join the block string.
+ *
+ * The naive `\sdata-redra-` is not robust: HTML also separates attributes
+ * with `/` and lets them abut a closing quote (`<b/data-redra-id=…>`,
+ * `<i x="y"data-redra-id=…>`) — both slipped forged stamps past the old
+ * regex (live bug found by the Stage-1 red-team). A `(?<![\w-])` lookbehind
+ * matches the attribute name wherever it legally starts, WITHOUT parsing —
+ * which is essential, because inline html nodes are split fragments
+ * (`<u>` … `</u>` arrive separately) that must stay verbatim so the
+ * block-level sanitize re-parse can pair them. Value forms covered:
+ * ="dq", ='sq', =bare, and valueless boolean.
+ */
 export function stripForgedStamps(rawHtml: string): string {
-  return rawHtml.replace(/\sdata-redra-[a-z-]*\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, ' ');
+  return rawHtml.replace(
+    /(?<![\w-])data-redra-[a-z-]*(\s*=\s*("[^"]*"|'[^']*'|[^\s/>]+))?/gi,
+    '',
+  );
 }

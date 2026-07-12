@@ -29,12 +29,23 @@ export function escapeHtml(text: string): string {
   return text.replace(/[&<>"]/g, (ch) => ESC[ch]!);
 }
 
-/** http/https/mailto/относительные пути; никаких javascript: и data:. */
+/**
+ * http/https/mailto/tg/relative only — never javascript:, data:, vbscript:…
+ *
+ * Evaluate the form a BROWSER would resolve, not the raw string: browsers
+ * strip TAB/LF/CR anywhere and trim leading C0 controls before reading the
+ * scheme, so "java&#9;script:" and "&#1;javascript:" both become
+ * "javascript:" and must be rejected. Missing this is a live XSS (found by
+ * the Stage-1 red-team).
+ */
 export function isSafeUrl(url: string): boolean {
-  const trimmed = url.trim();
-  if (trimmed === '') return false;
-  const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(trimmed);
-  if (!scheme) return true; // relative
+  const cleaned = url
+    .replace(/[\t\n\r]/g, '') // browsers remove these anywhere in the URL
+    .replace(/^[\u0000-\u0020]+/, '') // …and trim leading controls/space
+    .replace(/[\u0000-\u0020]+$/, '');
+  if (cleaned === '') return false;
+  const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(cleaned);
+  if (!scheme) return true; // relative — safe
   return /^(https?|mailto|tg)$/i.test(scheme[1]!);
 }
 

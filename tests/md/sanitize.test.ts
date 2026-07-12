@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseMarkdownDoc } from '../../src/md/md-parse.js';
-import { renderBlockHtml, renderDocumentBody } from '../../src/md/md-render.js';
+import { renderDocumentBody, isSafeUrl } from '../../src/md/md-render.js';
 import { stripForgedStamps } from '../../src/md/md-sanitize.js';
 
 /**
@@ -63,6 +63,66 @@ describe('md-sanitize: forged stamps cannot hijack ops', () => {
     expect(stripForgedStamps("<b data-redra-readonly='1'>x</b>")).not.toContain('data-redra-readonly');
     const html = renderAll('<div data-redra-id="c1-2">клон-фейк</div>\n');
     expect(html).not.toContain('c1-2');
+  });
+
+  // Red-team (Stage-1): attribute-boundary tricks that the old \sdata-redra-
+  // regex missed. Every separator form must still strip the forged stamp.
+  it('slash-separated and quote-abutted forged stamps are stripped', () => {
+    for (const raw of [
+      '<b/data-redra-id="m9">x</b>',
+      '<i x="y"data-redra-id="m9">x</i>',
+      "<b/data-redra-island='1'>x</b>",
+      '<b/data-redra-readonly=1>x</b>',
+      '<b DATA-REDRA-ID="m9">x</b>', // case-insensitive
+      '<b data-redra-island>x</b>', // valueless boolean
+    ]) {
+      expect(stripForgedStamps(raw).toLowerCase(), raw).not.toContain('data-redra');
+    }
+  });
+
+  it('a forged stamp inside a raw-html block cannot collide with a real block id', () => {
+    // The <span/data-redra-id="m0"> tried to duplicate the block root id.
+    const html = renderAll('<div>\n<span/data-redra-id="m0">hijack</span>\n</div>\n');
+    const m0 = [...html.matchAll(/data-redra-id="m0"/g)];
+    expect(m0).toHaveLength(1); // only the island wrapper the renderer stamped
+  });
+
+  it('split inline tags survive the strip (so block re-parse still pairs them)', () => {
+    // <u> and </u> arrive as separate raw-html nodes — stripping must not
+    // auto-close the opener.
+    const html = renderAll('Слово <u>под</u>чёркнутое.\n');
+    expect(html).toContain('<u>под</u>');
+  });
+});
+
+describe('md-sanitize: URL scheme obfuscation (XSS) is blocked', () => {
+  it('control-character-obfuscated javascript: is rejected everywhere', () => {
+    const attacks = [
+      '<a href="java&#9;script:alert(1)">x</a> t',   // tab in scheme
+      '<a href="java&#10;script:alert(1)">x</a> t',  // newline in scheme
+      '<a href="&#1;javascript:alert(1)">x</a> t',   // leading control
+      '[клик](java&#9;script:alert(1))',             // markdown link
+    ];
+    for (const md of attacks) {
+      const html = renderAll(md + '\n');
+      expect(html.toLowerCase(), md).not.toContain('javascript:');
+      expect(html, md).not.toContain('java\tscript');
+    }
+  });
+
+  it('data: image via tab-obfuscated scheme is rejected', () => {
+    const html = renderAll('<img src="data&#9;:text/html,<script>alert(1)</script>">\n');
+    expect(html).not.toContain('data\t:');
+    expect(html).not.toContain('<script>');
+  });
+
+  it('isSafeUrl evaluates the browser-stripped form', () => {
+    expect(isSafeUrl('java\tscript:alert(1)')).toBe(false);
+    expect(isSafeUrl('javascript:alert(1)')).toBe(false);
+    expect(isSafeUrl('java\nscript:alert(1)')).toBe(false);
+    expect(isSafeUrl('https://example.com')).toBe(true);
+    expect(isSafeUrl('img/a.png')).toBe(true); // relative still safe
+    expect(isSafeUrl('mailto:a@b.co')).toBe(true);
   });
 });
 
