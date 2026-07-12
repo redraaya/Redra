@@ -197,7 +197,11 @@ function collapseBrRuns(nodes: ChildNode[]): ChildNode[] {
  * its <br>. Children of a line-break block start a fresh line, so they
  * recurse with `false`.
  */
-function normalizeSiblings(nodes: readonly ChildNode[], precededByVisible: boolean): ChildNode[] {
+function normalizeSiblings(
+  nodes: readonly ChildNode[],
+  precededByVisible: boolean,
+  kept: ReadonlySet<string>,
+): ChildNode[] {
   const out: ChildNode[] = [];
   for (const node of nodes) {
     if (node.nodeName === '#comment') continue;
@@ -213,18 +217,19 @@ function normalizeSiblings(nodes: readonly ChildNode[], precededByVisible: boole
         // script/style/template content stays byte-identical (stamps inside
         // a template's content included — the gate strips them after the
         // content check); everything else recurses with these same rules.
-        node.childNodes = normalizeSiblings(node.childNodes, false);
+        node.childNodes = normalizeSiblings(node.childNodes, false, kept);
         for (const child of node.childNodes) child.parentNode = node;
       }
       out.push(node);
       continue;
     }
     if (DROPPED_TAGS.has(node.tagName)) continue;
-    if (KEPT_TAGS.has(node.tagName)) {
+    if (kept.has(node.tagName)) {
       node.attrs = filterAttrs(node);
       node.childNodes = normalizeSiblings(
         node.childNodes,
         precededByVisible || hasVisibleContent(out),
+        kept,
       );
       for (const child of node.childNodes) child.parentNode = node;
       out.push(node);
@@ -235,9 +240,11 @@ function normalizeSiblings(nodes: readonly ChildNode[], precededByVisible: boole
       if (precededByVisible || hasVisibleContent(out)) {
         out.push(defaultTreeAdapter.createElement('br', html.NS.HTML, []));
       }
-      out.push(...normalizeSiblings(node.childNodes, false));
+      out.push(...normalizeSiblings(node.childNodes, false, kept));
     } else {
-      out.push(...normalizeSiblings(node.childNodes, precededByVisible || hasVisibleContent(out)));
+      out.push(
+        ...normalizeSiblings(node.childNodes, precededByVisible || hasVisibleContent(out), kept),
+      );
     }
   }
   return collapseBrRuns(out);
@@ -270,9 +277,16 @@ function normalizeSiblings(nodes: readonly ChildNode[], precededByVisible: boole
  * Idempotent in both modes: a stamped element passes through unchanged, so
  * re-normalizing the output takes the same branches and is a no-op.
  */
-export function normalizeEditedHtml(raw: string): string {
+/** Extra bare inline tags a Markdown edit session may legitimately produce
+ *  (Telegram-Rich entities the writer knows how to serialize). Kept separate
+ *  from KEPT_TAGS so the HTML path — and the provenance gate that imports
+ *  KEPT_TAGS — stay byte-identical. */
+export const MD_KEPT_TAGS: ReadonlySet<string> = new Set([...KEPT_TAGS, 'tg-spoiler', 'ins', 'del']);
+
+export function normalizeEditedHtml(raw: string, profile: 'html' | 'md' = 'html'): string {
+  const kept = profile === 'md' ? MD_KEPT_TAGS : KEPT_TAGS;
   const fragment = parseFragment(raw);
-  fragment.childNodes = normalizeSiblings(fragment.childNodes, false);
+  fragment.childNodes = normalizeSiblings(fragment.childNodes, false, kept);
   for (const child of fragment.childNodes) child.parentNode = fragment;
   return serialize(fragment);
 }

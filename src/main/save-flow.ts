@@ -106,7 +106,10 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
       if (!win || win.isDestroyed()) return { ok: false, error: 'no window' };
       const result = await dialog.showSaveDialog(win, {
         defaultPath: cur.filePath,
-        filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
+        filters:
+          cur.format === 'md'
+            ? [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] }]
+            : [{ name: 'HTML', extensions: ['html', 'htm'] }],
       });
       if (result.canceled || !result.filePath) return { ok: false, canceled: true };
       asPath = result.filePath;
@@ -179,7 +182,7 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     const win = deps.getWin();
     if (!win || win.isDestroyed()) return { ok: false, canceled: true };
 
-    const pdfName = path.basename(cur.filePath).replace(/\.html?$/i, '') + '.pdf';
+    const pdfName = path.basename(cur.filePath).replace(/\.(html?|md|markdown|mdown|mkd)$/i, '') + '.pdf';
     const result = await dialog.showSaveDialog(win, {
       defaultPath: path.join(path.dirname(cur.filePath), pdfName),
       filters: [{ name: 'PDF', extensions: ['pdf'] }],

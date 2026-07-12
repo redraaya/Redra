@@ -300,7 +300,7 @@ window.addEventListener('drop', (e) => {
   dragDepth = 0;
   document.body.classList.remove('drag-over');
   const file = e.dataTransfer?.files[0];
-  if (!file || !/\.html?$/i.test(file.name)) return;
+  if (!file || !/\.(html?|md|markdown|mdown|mkd)$/i.test(file.name)) return;
   void redra.openPath(redra.pathForFile(file));
 });
 

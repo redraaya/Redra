@@ -22,6 +22,8 @@ import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
 import { guardCloneBlock, guardDocPush } from './lib/op-guard.js';
+import { guardMd, renderMdCloneFragment } from './format/md-doc.js';
+import { OPENABLE_RE } from '../shared/doc-types.js';
 import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
 import { getElementById, renderCloneFragment } from '../engine/index.js';
 import {
@@ -57,7 +59,7 @@ const SHELL_STRIP_HEIGHT = 44;
 // code 0 after the document is served (perf lines logged) — for CI smoke runs.
 const cliArgs = process.argv.slice(app.isPackaged ? 1 : 2);
 const SMOKE = cliArgs.includes('--smoke');
-const cliFile = cliArgs.find((a) => !a.startsWith('-') && /\.html?$/i.test(a));
+const cliFile = cliArgs.find((a) => !a.startsWith('-') && OPENABLE_RE.test(a));
 const shotIdx = cliArgs.indexOf('--screenshot');
 const shotPath = shotIdx >= 0 ? (cliArgs[shotIdx + 1] ?? null) : null;
 
@@ -577,7 +579,7 @@ function ensureDocView(ctx: WindowContext): WebContentsView {
       } catch {
         return; // navigation already prevented
       }
-      if (/\.html?$/i.test(fsPath)) void openDocument(fsPath); // file dropped onto the doc view
+      if (OPENABLE_RE.test(fsPath)) void openDocument(fsPath); // file dropped onto the doc view
       return;
     }
     event.preventDefault();
@@ -801,7 +803,11 @@ async function openViaDialog(): Promise<OpenResult> {
   const parent = focusedCtx()?.win ?? null;
   const options = {
     properties: ['openFile' as const],
-    filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
+    filters: [
+      { name: t('dialog.documentsFilter'), extensions: ['html', 'htm', 'md', 'markdown', 'mdown', 'mkd'] },
+      { name: 'HTML', extensions: ['html', 'htm'] },
+      { name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] },
+    ],
   };
   const result = parent
     ? await dialog.showOpenDialog(parent, options)
@@ -933,7 +939,10 @@ function registerIpc(): void {
     if (!ctx) return { ok: false, error: 'bad sender' };
     const cur = ctx.docManager.currentDoc;
     if (!cur) return { ok: false, error: 'no document' };
-    const checked = guardDocPush(docId, raw, cur.docId, cur.doc, cur.journal.ops);
+    const checked =
+      cur.format === 'md' && cur.mdState
+        ? guardMd(docId, raw, cur.docId, cur.mdState, cur.journal.ops)
+        : guardDocPush(docId, raw, cur.docId, cur.doc, cur.journal.ops);
     if (!checked.ok) {
       console.error('[ops] rejected push:', checked.error);
       // Localized HERE (main owns the locale); the preload only relays it.
@@ -961,6 +970,21 @@ function registerIpc(): void {
     const cur = ctx.docManager.currentDoc;
     if (!cur) return { ok: false, error: 'no document' };
     const cloneId = `c${cur.cloneCounter + 1}`;
+    if (cur.format === 'md' && cur.mdState) {
+      // md clone: the docId must match (stale-doc guard) and the target must
+      // be a top-level md block. renderMdCloneFragment validates the id and
+      // renders the SAME source block under the minted clone id; the op is
+      // journaled so save re-materializes the duplicate.
+      const target = typeof targetId === 'string' ? targetId : '';
+      const html = docId === cur.docId ? renderMdCloneFragment(cur.mdState, target, cloneId) : null;
+      if (!html) {
+        return { ok: false, error: 'cannot clone this block', code: 'invalid', userMessage: t('notice.opRejected') };
+      }
+      cur.cloneCounter += 1;
+      cur.journal.push({ type: 'cloneBlock', id: target, cloneId });
+      broadcastDirty(ctx);
+      return { ok: true, cloneId, html };
+    }
     const checked = guardCloneBlock(docId, targetId, cloneId, cur.docId, cur.doc, cur.journal.ops);
     if (!checked.ok) {
       console.error('[ops] rejected cloneBlock:', checked.error);

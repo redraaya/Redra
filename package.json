@@ -18,6 +18,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "smoke": "electron-vite build && electron . --smoke tests/fixtures/sample-report.html",
+    "smoke:md": "electron-vite build && electron . --smoke tests/fixtures/sample-note.md",
     "dist": "electron-vite build && electron-builder --mac --arm64",
     "dist:dir": "electron-vite build && electron-builder --mac --arm64 --dir",
     "test": "vitest run",

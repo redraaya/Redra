@@ -97,6 +97,7 @@ const STRINGS = {
     en: 'The file is not an image (PNG, JPEG, WebP, GIF, SVG, AVIF)',
   },
   'dialog.imagesFilter': { ru: 'Картинки', en: 'Images' },
+  'dialog.documentsFilter': { ru: 'HTML и Markdown', en: 'HTML & Markdown' },
   // Rejected-op toast (quiet pill in the shell strip, auto-hides).
   'notice.blockedBlock': {
     ru: 'Это действие нельзя применить к уже изменённому блоку — сначала сохраните и переоткройте файл',

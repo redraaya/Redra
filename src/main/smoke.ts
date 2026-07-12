@@ -86,13 +86,21 @@ export class SmokeHarness {
   private opsRoundtrip(): void {
     const cur = this.getDoc();
     if (!cur) return;
-    const checked = validateOp({ type: 'editText', id: 'r1', html: '<b>smoke</b>' }, cur.doc);
-    if (!checked.ok) {
-      console.error('[smoke] ops-roundtrip FAILED: validateOp:', checked.error);
-      app.exit(1);
-      return;
+    // The self-check op is format-shaped: HTML stamps are "r<n>" and go
+    // through validateOp; Markdown stamps are "m<n>" (validated elsewhere).
+    let op: { type: 'editText'; id: string; html: string };
+    if (cur.format === 'md') {
+      op = { type: 'editText', id: 'm0', html: 'smoke' };
+    } else {
+      const checked = validateOp({ type: 'editText', id: 'r1', html: '<b>smoke</b>' }, cur.doc);
+      if (!checked.ok) {
+        console.error('[smoke] ops-roundtrip FAILED: validateOp:', checked.error);
+        app.exit(1);
+        return;
+      }
+      op = checked.op as typeof op;
     }
-    cur.journal.push(checked.op);
+    cur.journal.push(op);
     const dirtyAfterPush = cur.journal.dirty;
     cur.journal.undo();
     if (!dirtyAfterPush || cur.journal.dirty) {

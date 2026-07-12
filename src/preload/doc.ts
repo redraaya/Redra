@@ -10,6 +10,7 @@
 import { ipcRenderer, webUtils } from 'electron';
 import { createEditorController } from './editor/controller.js';
 import type { EditorController } from './editor/controller.js';
+import { normalizeEditedHtml } from '../engine/normalize.js';
 import type {
   CloneBlockResult,
   EditAvailability,
@@ -55,7 +56,12 @@ let controller: EditorController | null = null;
 let wantEditing = true;
 
 window.addEventListener('DOMContentLoaded', () => {
-  controller = createEditorController(window, bridge);
+  // The served document declares its format on <html data-redra-format>. For
+  // Markdown the edit-normalizer keeps Telegram-Rich inline tags (tg-spoiler,
+  // ins/del) that the HTML profile would strip — see normalizeEditedHtml.
+  const format = document.documentElement.getAttribute('data-redra-format') === 'md' ? 'md' : 'html';
+  const normalize = format === 'md' ? (raw: string) => normalizeEditedHtml(raw, 'md') : undefined;
+  controller = createEditorController(window, bridge, normalize);
   controller.setEditing(wantEditing);
   // Liveness beacon: main's smoke mode fails the run when this never arrives
   // (e.g. the preload died on a bundling error — the editing layer IS the app).

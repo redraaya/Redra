@@ -43,6 +43,16 @@ mac:
         CFBundleTypeExtensions:
           - html
           - htm
+      - CFBundleTypeName: Markdown document
+        CFBundleTypeRole: Editor
+        LSHandlerRank: Alternate
+        LSItemContentTypes:
+          - net.daringfireball.markdown
+        CFBundleTypeExtensions:
+          - md
+          - markdown
+          - mdown
+          - mkd
 
 dmg:
   # Classic layout: the app on the left, a symlink to /Applications on the right.

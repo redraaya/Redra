@@ -8,13 +8,27 @@ import { ensureUtf8Charset } from './lib/charset-rewrite.js';
 import { decodeHtml } from './lib/encoding.js';
 import type { PerfLog } from './lib/perf.js';
 import type { SaveResult } from '../shared/ipc.js';
+import type { DocFormat } from '../shared/doc-types.js';
+import { formatForPath } from '../shared/doc-types.js';
+import { parseMd, serializeMd } from './format/md-doc.js';
+import type { MdState } from './format/md-doc.js';
+
+/** Placeholder RedraDoc for md documents: OpenedDoc.doc is HTML-typed and
+ *  read only on the HTML path (save/guard/clone branch on `format`), so md
+ *  docs park an empty one here rather than widen the field (which would ripple
+ *  into every existing consumer and test). */
+const EMPTY_HTML_DOC = (): RedraDoc => parseDocument('');
 
 export interface OpenedDoc {
   docId: string;
   filePath: string;
   /** Directory the redra:// protocol serves relative resources from. */
   dir: string;
+  /** 'html' (default) or 'md'. Save / ops-guard / clone branch on this. */
+  format: DocFormat;
   doc: RedraDoc;
+  /** Present only for format==='md' (the parsed markdown + flavor + clone set). */
+  mdState?: MdState;
   journal: Journal;
   /** Raw bytes as read from disk at open time (verbatim source for ops-free saves and backups). */
   originalBytes: Buffer;
@@ -113,20 +127,34 @@ export class DocumentManager {
     const stat = await fs.stat(filePath);
     const tRead = performance.now();
 
+    // decodeHtml is really "bytes → text with BOM strip + meta-charset sniff";
+    // an .md file has no <meta charset> so it falls back to utf-8 — correct.
     const { text, encoding, hadBom } = decodeHtml(originalBytes);
     const tDecode = performance.now();
 
-    const doc = parseDocument(text);
+    const format = formatForPath(filePath) ?? 'html';
+    let doc: RedraDoc;
+    let mdState: MdState | undefined;
+    let stampedHtml: string;
+    if (format === 'md') {
+      const parsed = parseMd(text, path.basename(filePath));
+      stampedHtml = parsed.stampedHtml;
+      mdState = parsed.state;
+      doc = EMPTY_HTML_DOC(); // unused for md (see the placeholder note above)
+    } else {
+      doc = parseDocument(text);
+      stampedHtml = serializeForView(doc);
+    }
     const tParse = performance.now();
-
-    const stampedHtml = serializeForView(doc);
     const tStamp = performance.now();
 
     const opened: OpenedDoc = {
       docId: randomUUID(),
       filePath: path.resolve(filePath),
       dir: path.dirname(path.resolve(filePath)),
+      format,
       doc,
+      mdState,
       journal: new Journal(),
       originalBytes,
       encoding,
@@ -193,14 +221,26 @@ export class DocumentManager {
     const st = await fs.stat(filePath).catch(() => null);
 
     const { text, encoding, hadBom } = decodeHtml(originalBytes);
-    const doc = parseDocument(text);
-    const stampedHtml = serializeForView(doc);
+    let doc: RedraDoc;
+    let mdState: MdState | undefined;
+    let stampedHtml: string;
+    if (cur.format === 'md') {
+      const parsed = parseMd(text, path.basename(filePath));
+      stampedHtml = parsed.stampedHtml;
+      mdState = parsed.state;
+      doc = EMPTY_HTML_DOC();
+    } else {
+      doc = parseDocument(text);
+      stampedHtml = serializeForView(doc);
+    }
 
     const opened: OpenedDoc = {
       docId: randomUUID(),
       filePath,
       dir: cur.dir,
+      format: cur.format,
       doc,
+      mdState,
       journal: new Journal(),
       originalBytes,
       encoding,
@@ -278,6 +318,10 @@ export class DocumentManager {
       let bytes: Buffer;
       if (ops.length === 0) {
         bytes = cur.originalBytes;
+      } else if (cur.format === 'md' && cur.mdState) {
+        // Markdown: block-table splice writes utf-8 source; no <meta charset>
+        // to rewrite (the charset step is HTML-only).
+        bytes = Buffer.from(serializeMd(cur.mdState, ops), 'utf8');
       } else {
         let html = serializeSource(cur.doc, ops);
         if (cur.encoding !== 'utf-8' || cur.hadBom) html = ensureUtf8Charset(html);
