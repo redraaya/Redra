@@ -261,6 +261,12 @@ function writeParagraphLines(el: P5Element, ctx: Ctx): string {
   return paragraphs.join(ctx.eol + ctx.eol);
 }
 
+/** Block children a list item can hold — routed through writeBlockElement so
+ *  they survive (a code fence / table inside an <li> must not flatten to text). */
+const LIST_BLOCK_TAGS = new Set([
+  'pre', 'table', 'blockquote', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'details', 'div',
+]);
+
 function writeListItems(list: P5Element, ctx: Ctx, indent: string): string[] {
   const ordered = list.tagName === 'ol';
   const startAttr = attr(list, 'start');
@@ -277,27 +283,28 @@ function writeListItems(list: P5Element, ctx: Ctx, indent: string): string[] {
       : '';
     const contIndent = indent + ' '.repeat(marker.length);
     // A list item is a sequence of BLOCKS: a loose item has real <p> children
-    // (the renderer keeps them), a tight item has bare inline runs. Each block
-    // is emitted as its own paragraph so two <p> never fuse ("parasecond") -
-    // continuation paragraphs get a blank line and the continuation indent;
-    // nested lists recurse with that indent.
+    // (the renderer keeps them) and can contain code/quotes/tables/nested
+    // lists; a tight item has bare inline runs. Each block is emitted with a
+    // blank line + continuation indent so nothing fuses and no block child is
+    // ever dropped to text. A loose item stays loose across a nested list.
+    const loose = (child.childNodes ?? []).some((c) => isElement(c) && c.tagName === 'p');
     let inlineRun: P5Node[] = [];
     let firstBlock = true;
-    const emitParagraph = (text: string): void => {
+    const emitLines = (text: string): void => {
       if (text === '') return;
       const body = text.split(ctx.eol).join(ctx.eol + contIndent); // indent wrapped lines
       if (firstBlock) {
         lines.push(`${indent}${marker}${task}${body}`);
         firstBlock = false;
       } else {
-        lines.push(''); // blank line before a loose continuation paragraph
+        lines.push(''); // blank line before a loose continuation block
         lines.push(contIndent + body);
       }
     };
     const flushInline = (): void => {
       if (inlineRun.length === 0) return;
       const fake: P5Element = { ...child, childNodes: inlineRun } as P5Element;
-      emitParagraph(writeParagraphLines(fake, ctx));
+      emitLines(writeParagraphLines(fake, ctx));
       inlineRun = [];
     };
     for (const c of child.childNodes ?? []) {
@@ -306,11 +313,18 @@ function writeListItems(list: P5Element, ctx: Ctx, indent: string): string[] {
         if (firstBlock) {
           lines.push(`${indent}${marker}${task}`.replace(/\s+$/, ''));
           firstBlock = false;
+        } else if (loose) {
+          lines.push(''); // keep a loose item loose across its nested list
         }
         lines.push(...writeListItems(c, ctx, contIndent)); // already contIndent-ed
       } else if (isElement(c) && c.tagName === 'p') {
         flushInline();
-        emitParagraph(writeParagraphLines({ ...c } as P5Element, ctx));
+        emitLines(writeParagraphLines({ ...c } as P5Element, ctx));
+      } else if (isElement(c) && LIST_BLOCK_TAGS.has(c.tagName)) {
+        // A block child (code fence, quote, table, hr, heading, island): write
+        // it as a real block, not flattened to text.
+        flushInline();
+        emitLines(writeBlockElement(c, ctx));
       } else {
         inlineRun.push(c);
       }

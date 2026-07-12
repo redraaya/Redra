@@ -10,6 +10,7 @@ import {
   parseMarkdownDoc,
   renderDocumentBody,
   renderBlockHtml,
+  collectDefinitions,
   buildDocShell,
   serializeMdSource,
   guardMdPush,
@@ -17,7 +18,7 @@ import {
   mdRootOf,
   mdBlockIndexOf,
 } from '../../md/index.js';
-import type { MdDoc, MdFlavor } from '../../md/index.js';
+import type { MdDoc, MdFlavor, MdDefinition } from '../../md/index.js';
 import { MD_THEME } from './md-theme.js';
 
 export interface MdState {
@@ -66,7 +67,11 @@ export function renderMdCloneFragment(state: MdState, targetId: string, cloneId:
   const idx = mdBlockIndexOf(targetId);
   if (idx === null || idx < 0 || idx >= state.mdDoc.blocks.length) return null;
   const block = state.mdDoc.blocks[idx]!;
-  const html = renderBlockHtml({ ...block, rootId: cloneId });
+  const defs = new Map<string, MdDefinition>();
+  for (const b of state.mdDoc.blocks) {
+    for (const [k, v] of collectDefinitions(b.node as { children?: unknown[] })) defs.set(k, v);
+  }
+  const html = renderBlockHtml({ ...block, rootId: cloneId }, defs);
   state.mintedClones.add(cloneId);
   return html;
 }

@@ -19,11 +19,12 @@
 import { parseFragment, serialize } from 'parse5';
 import type { DefaultTreeAdapterMap } from 'parse5';
 import type { Op } from '../engine/ops.js';
-import { renderBlockHtml } from './md-render.js';
+import { renderBlockHtml, collectDefinitions } from './md-render.js';
+import type { MdDefinition } from './md-render.js';
 import { writeElementMarkdown } from './md-writer.js';
 import type { MdFlavor } from './md-flavor.js';
 import { RICH_DEFAULTS } from './md-flavor.js';
-import { mdRootOf } from './md-types.js';
+import { anyRootOf } from './md-types.js';
 import type { MdDoc } from './md-types.js';
 
 type P5Node = DefaultTreeAdapterMap['node'];
@@ -43,17 +44,20 @@ interface Entry {
    *  resolve to their entry by this, NOT by table position — a clone/move
    *  splice must not make a later op edit the wrong block (id-stability). */
   rootId: string;
-  /** Original pristine block index this entry materializes from (-1 = clone,
-   *  which materializes by parsing its own `pristine` bytes). */
+  /** Original pristine block index this entry MATERIALIZES from. For a clone
+   *  it points at the SOURCE block; the clone is stamped under its own rootId. */
   blockIndex: number;
+  /** rootId of the block that ORIGINALLY preceded this entry (null = head).
+   *  A gap is only a valid separator while this adjacency still holds — after a
+   *  delete/move it must be re-validated (a lone '\n' after a heading is fine,
+   *  but that same '\n' before a paragraph fuses them). */
+  origPrevRootId: string | null;
   /** Present until the block is materialized; then its bytes come from the tree. */
   pristine: string | null;
   /** Parsed fragment whose single root element carries the block's stamps. */
   live: P5Element | null;
   removed: boolean;
-  /** The gap that PRECEDED this entry at its ORIGINAL position. Gaps are
-   *  emitted POSITIONALLY at serialize time (not carried across a move), so
-   *  this is only consulted for entries that never left their run. */
+  /** The gap that PRECEDED this entry at its ORIGINAL position. */
   gapBefore: string;
 }
 
@@ -68,13 +72,18 @@ function findById(root: P5Parent, id: string): P5Element | null {
   return null;
 }
 
-function materialize(entry: Entry, doc: MdDoc): P5Element {
+function materialize(
+  entry: Entry,
+  doc: MdDoc,
+  defs: ReadonlyMap<string, MdDefinition>,
+): P5Element {
   if (entry.live) return entry.live;
-  // A pristine top-level block re-renders from its source (ids match the live
-  // DOM by the render id-invariant); a clone entry has no doc block, so it
-  // parses its own bytes instead.
-  const html =
-    entry.blockIndex >= 0 ? renderBlockHtml(doc.blocks[entry.blockIndex]!) : (entry.pristine ?? '');
+  // Re-render the source block stamped under THIS entry's rootId — a normal
+  // block keeps its own id (no-op override), a clone renders the same source
+  // block stamped as the minted cloneId. Ids match the live DOM by the render
+  // id-invariant, so live-DOM ops apply to the re-rendered block.
+  const src = doc.blocks[entry.blockIndex]!;
+  const html = renderBlockHtml({ ...src, rootId: entry.rootId }, defs);
   const fragment = parseFragment(html);
   const root = (fragment.childNodes ?? []).find(isElement);
   if (!root) throw new MdOpError(`block ${entry.rootId} did not materialize`);
@@ -100,17 +109,22 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
   const table: Entry[] = doc.blocks.map((b, i) => ({
     rootId: b.rootId,
     blockIndex: i,
+    origPrevRootId: i > 0 ? doc.blocks[i - 1]!.rootId : null,
     pristine: doc.source.slice(b.span.start, b.span.end),
     live: null,
     removed: false,
     gapBefore: doc.gaps[i]!,
   }));
   const trailingGap = doc.gaps[doc.blocks.length]!;
+  // Definitions resolve reference-style links in any re-rendered (edited) block.
+  const defs = new Map<string, MdDefinition>();
+  for (const b of doc.blocks) for (const [k, v] of collectDefinitions(b.node as { children?: unknown[] })) defs.set(k, v);
 
-  /** Resolve an op's id to its entry's CURRENT table index BY IDENTITY — never
-   *  by the id-derived position, which drifts after a clone/move splice. */
+  /** Resolve an op's id (m<i> OR a minted clone c<n>) to its entry's CURRENT
+   *  table index BY IDENTITY — never by the id-derived position, which drifts
+   *  after a clone/move splice. */
   const resolveIndex = (id: string): number => {
-    const root = mdRootOf(id);
+    const root = anyRootOf(id);
     if (root === null) throw new MdOpError(`op targets a non-md id: ${id}`);
     const idx = table.findIndex((e) => !e.removed && e.rootId === root);
     if (idx < 0) throw new MdOpError(`op targets unknown/removed block: ${id}`);
@@ -121,7 +135,7 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
     switch (op.type) {
       case 'editText': {
         const idx = resolveIndex(op.id);
-        const root = materialize(table[idx]!, doc);
+        const root = materialize(table[idx]!, doc, defs);
         const target = getId(root) === op.id ? root : findById(root as unknown as P5Parent, op.id);
         if (!target) throw new MdOpError(`editText: id not in its block: ${op.id}`);
         applyEditText(target, op.html);
@@ -133,7 +147,7 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
           // Top-level: drop the whole entry (bytes leave with it).
           table[idx]!.removed = true;
         } else {
-          const root = materialize(table[idx]!, doc);
+          const root = materialize(table[idx]!, doc, defs);
           const target = findById(root as unknown as P5Parent, op.id);
           if (!target) throw new MdOpError(`deleteBlock: id not in its block: ${op.id}`);
           detach(target);
@@ -148,7 +162,7 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
           const beforeIdx = op.beforeId === null ? table.length : resolveIndex(op.beforeId);
           moveEntry(table, idx, beforeIdx);
         } else {
-          const root = materialize(table[idx]!, doc);
+          const root = materialize(table[idx]!, doc, defs);
           moveNested(root as unknown as P5Parent, op.id, op.beforeId);
         }
         break;
@@ -163,7 +177,10 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
         const bytes = entry.pristine ?? writeElementMarkdown(entry.live!, RICH_DEFAULTS, doc.eol);
         table.splice(idx + 1, 0, {
           rootId: op.cloneId,
-          blockIndex: -1,
+          // The clone materializes from the SAME source block as its origin,
+          // stamped under the cloneId (materialize applies the rootId override).
+          blockIndex: entry.blockIndex,
+          origPrevRootId: entry.rootId, // inserted right after its origin
           pristine: bytes,
           live: null,
           removed: false,
@@ -217,19 +234,27 @@ export function serializeMdSource(doc: MdDoc, ops: readonly Op[], flavor: MdFlav
   const { trailingGap, headGap } = table as unknown as { trailingGap: string; headGap: string };
   let out = '';
   let first = true;
+  let lastEmittedRootId: string | null = null;
+  const BLANK_LINE = /\r?\n[ \t]*\r?\n/; // a real block separator
   for (const entry of table) {
     if (entry.removed) continue;
-    // Gaps are POSITIONAL, not owned by the block: the first surviving entry
-    // emits the document head (gaps[0]); every later entry emits its original
-    // separator when it still HAS one (contains a newline → an unmoved run,
-    // kept byte-faithful), else a synthesized blank line (it came from the head
-    // and needs a real separator now — the fix for glued/leaked-gap moves).
+    // Gaps are POSITIONAL, and a gap is only a valid separator while the entry
+    // still follows its ORIGINAL predecessor. First surviving entry → the
+    // document head. Otherwise: if the predecessor is UNCHANGED, the author's
+    // own gap is byte-faithful (a lone '\n' after a self-terminating block is
+    // legitimate). If adjacency CHANGED (delete/move/clone), that gap may no
+    // longer separate — keep it only when it already contains a blank line,
+    // else synthesize one (prevents fusing two paragraphs / destroying a link
+    // definition).
     if (first) {
       out += headGap;
+    } else if (entry.origPrevRootId === lastEmittedRootId) {
+      out += entry.gapBefore;
     } else {
-      out += /\n/.test(entry.gapBefore) ? entry.gapBefore : doc.eol + doc.eol;
+      out += BLANK_LINE.test(entry.gapBefore) ? entry.gapBefore : doc.eol + doc.eol;
     }
     first = false;
+    lastEmittedRootId = entry.rootId;
     if (entry.live) {
       out += writeElementMarkdown(entry.live, flavor, doc.eol);
     } else {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseMarkdownDoc } from '../../src/md/md-parse.js';
-import { renderBlockHtml, renderDocumentBody } from '../../src/md/md-render.js';
+import { renderBlockHtml, renderDocumentBody, collectDefinitions } from '../../src/md/md-render.js';
 import { serializeMdSource } from '../../src/md/md-ops.js';
 import { guardMdPush } from '../../src/md/md-op-guard.js';
 import { RICH_DEFAULTS } from '../../src/md/md-flavor.js';
@@ -131,5 +131,86 @@ describe('review: guard rejects an editText on a no-DOM (empty-render) block', (
     // And a save with that op would not silently corrupt (it never reaches disk
     // because the guard rejected it) — but even if forced, it throws, not writes.
     expect(() => serializeMdSource(doc, [{ type: 'editText', id: 'm1', html: 'x' }], RICH_DEFAULTS)).toThrow();
+  });
+});
+
+// ---- re-review round 2 findings ----
+
+describe('re-review: single-newline gap after a self-terminating block never fuses paragraphs', () => {
+  it('delete a heading between two paragraphs → paragraphs stay separate', () => {
+    // para0 \n\n # H \n para2  — the "\n" after "# H" is valid ONLY after the
+    // heading; deleting the heading must not glue para0 and para2.
+    const out = save('para0\n\n# H\npara2\n', [{ type: 'deleteBlock', id: 'm1' }]);
+    expect(blocksOf(out)).toBe(2); // still two paragraphs, not one fused block
+    expect(out).not.toContain('para0\npara2');
+  });
+  it('delete a heading above a link definition → definition survives (not fused away)', () => {
+    const out = save('Intro.\n\n# H\n[ref]: https://example.com/a\n', [{ type: 'deleteBlock', id: 'm1' }]);
+    // The definition must remain a definition, not merge into "Intro."
+    const re = parseMarkdownDoc(out);
+    expect(re.tree.children.some((c) => c.type === 'definition')).toBe(true);
+  });
+  it('an authored single newline after a heading is preserved when nothing changes around it', () => {
+    // byte-fidelity: editing an UNRELATED block keeps "# H\npara" verbatim
+    const src = '# H\npara\n\nOther.\n';
+    const doc = parseMarkdownDoc(src);
+    const inner = /^<p[^>]*>([\s\S]*)<\/p>$/.exec(renderBlockHtml(doc.blocks[2]!))![1]!;
+    const out = serializeMdSource(doc, [{ type: 'editText', id: 'm2', html: inner + '!' }], RICH_DEFAULTS);
+    expect(out).toContain('# H\npara'); // untouched adjacency stays byte-faithful
+  });
+});
+
+describe('re-review: a duplicated (clone) block is editable and its edits are saved', () => {
+  it('editText on a clone id round-trips through save', () => {
+    const doc = parseMarkdownDoc('AAA\n\nBBB\n');
+    const out = serializeMdSource(
+      doc,
+      [
+        { type: 'cloneBlock', id: 'm0', cloneId: 'c1' },
+        { type: 'editText', id: 'c1', html: 'CLONE EDITED' },
+      ],
+      RICH_DEFAULTS,
+    );
+    expect(out).toBe('AAA\n\nCLONE EDITED\n\nBBB\n');
+  });
+  it('a clone can be deleted without touching the original', () => {
+    const out = save('AAA\n\nBBB\n', [
+      { type: 'cloneBlock', id: 'm0', cloneId: 'c1' },
+      { type: 'deleteBlock', id: 'c1' },
+    ]);
+    expect(out).toBe('AAA\n\nBBB\n');
+  });
+});
+
+describe('re-review: block children of a list item are not destroyed', () => {
+  it('a fenced code block inside a list item survives an edit elsewhere in the list', () => {
+    const src = '- item one\n\n  ```js\n  x()\n  ```\n- item two\n';
+    const doc = parseMarkdownDoc(src);
+    // edit the whole list block minimally (re-render item two) — code must stay
+    const listHtml = renderBlockHtml(doc.blocks[0]!);
+    // grab item two's li id
+    const ids = [...listHtml.matchAll(/data-redra-id="([^"]+)"/g)].map((m) => m[1]!);
+    const out = serializeMdSource(doc, [{ type: 'editText', id: ids[ids.length - 1]!, html: 'item two EDITED' }], RICH_DEFAULTS);
+    expect(out).toContain('```'); // the code fence is not flattened to text
+    expect(out).toContain('x()');
+    expect(renderDocumentBody(parseMarkdownDoc(out).blocks)).toContain('<pre');
+  });
+});
+
+describe('re-review: reference-style link round-trips as a working link on edit', () => {
+  it('editing a paragraph with [text][ref] keeps the link (resolved), definition stays', () => {
+    const src = 'See [the docs][d] here.\n\n[d]: https://example.com/docs\n';
+    const doc = parseMarkdownDoc(src);
+    // The served view resolves the reference to a real <a href> (as the user
+    // sees and edits it) — that resolved HTML is the editText payload.
+    const defs = collectDefinitions(doc.blocks[1]!.node as { children?: unknown[] });
+    const rendered = renderBlockHtml(doc.blocks[0]!, defs);
+    expect(rendered).toContain('href="https://example.com/docs"');
+    const inner = /^<p[^>]*>([\s\S]*)<\/p>$/.exec(rendered)![1]!;
+    // inner has a real <a href> now (resolved), so the writer emits an inline link
+    const out = serializeMdSource(doc, [{ type: 'editText', id: 'm0', html: inner }], RICH_DEFAULTS);
+    expect(out).toContain('https://example.com/docs'); // link preserved
+    expect(out).toContain('[d]:'); // definition line still present (for other refs)
+    expect(out).not.toMatch(/See the docs here/); // not flattened to plain text
   });
 });

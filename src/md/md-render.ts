@@ -51,9 +51,29 @@ export function isSafeUrl(url: string): boolean {
 
 const LANG_RE = /^[a-zA-Z0-9#+_.-]{1,32}$/;
 
+export interface MdDefinition {
+  url: string;
+  title: string | null;
+}
+
 interface RenderState {
   rootId: string;
   next: number; // 0 → root itself, then -1, -2, …
+  /** identifier → definition, for resolving reference-style links/images. */
+  defs: ReadonlyMap<string, MdDefinition>;
+}
+
+/** Collect every reference-link/image definition in a tree (identifier → url). */
+export function collectDefinitions(root: { children?: unknown[] }): Map<string, MdDefinition> {
+  const map = new Map<string, MdDefinition>();
+  const walk = (node: { type?: string; identifier?: string; url?: string; title?: string | null; children?: unknown[] }): void => {
+    if (node.type === 'definition' && node.identifier) {
+      map.set(node.identifier.toLowerCase(), { url: node.url ?? '', title: node.title ?? null });
+    }
+    for (const c of node.children ?? []) walk(c as typeof node);
+  };
+  walk(root as Parameters<typeof walk>[0]);
+  return map;
 }
 
 function stampId(state: RenderState): string {
@@ -175,12 +195,21 @@ function renderNode(node: AnyNode, s: RenderState): string {
     }
     case 'footnoteReference':
       return `<sup class="md-fnref">${escapeHtml(node.label ?? node.identifier ?? '')}</sup>`;
-    case 'linkReference':
-    case 'imageReference':
-      // Unresolved references render as their text form; resolved ones are
-      // materialized by mdast as link/image? (mdast keeps references — v1
-      // renders the readable text, the bytes in the file stay untouched.)
-      return renderChildren(node, s) || escapeHtml(node.label ?? '');
+    case 'linkReference': {
+      // Resolve against the doc's definitions so an edit round-trips as a real
+      // inline link (never a plain-text drop that orphans the definition). The
+      // definition line stays in the file for any other references to it.
+      const def = node.identifier ? s.defs.get(node.identifier.toLowerCase()) : undefined;
+      const inner = renderChildren(node, s) || escapeHtml(node.label ?? node.identifier ?? '');
+      if (!def) return inner; // unknown reference: readable text
+      return `<a href="${isSafeUrl(def.url) ? escapeHtml(def.url) : ''}">${inner}</a>`;
+    }
+    case 'imageReference': {
+      const def = node.identifier ? s.defs.get(node.identifier.toLowerCase()) : undefined;
+      if (!def) return escapeHtml(node.alt ?? node.label ?? node.identifier ?? '');
+      const id = stampId(s);
+      return `<img data-redra-id="${id}" src="${isSafeUrl(def.url) ? escapeHtml(def.url) : ''}" alt="${escapeHtml(node.alt ?? '')}">`;
+    }
     default:
       // Unknown node kind: render children if any, else nothing. The block's
       // bytes are still preserved unless the user edits this very block.
@@ -238,8 +267,13 @@ function renderTableCell(
  * the block handle (move/duplicate/delete) works on it; the sanitizer marks
  * it read-only when its content exceeds the edit-safe vocabulary.
  */
-export function renderBlockHtml(block: MdBlockEntry): string {
-  const state: RenderState = { rootId: block.rootId, next: 0 };
+const NO_DEFS: ReadonlyMap<string, MdDefinition> = new Map();
+
+export function renderBlockHtml(
+  block: MdBlockEntry,
+  defs: ReadonlyMap<string, MdDefinition> = NO_DEFS,
+): string {
+  const state: RenderState = { rootId: block.rootId, next: 0, defs };
   if ((block.node as AnyNode).type === 'html') {
     const inner = stripForgedStamps((block.node as AnyNode).value ?? '');
     return sanitizeBlockHtml(
@@ -252,7 +286,12 @@ export function renderBlockHtml(block: MdBlockEntry): string {
   return sanitizeBlockHtml(raw, block.rootId);
 }
 
-/** Render every block; join with '\n' for readable served HTML. */
+/** Render every block; join with '\n' for readable served HTML. Definitions are
+ *  collected from the block set so reference-style links resolve. */
 export function renderDocumentBody(blocks: readonly MdBlockEntry[]): string {
-  return blocks.map((b) => renderBlockHtml(b)).filter((h) => h !== '').join('\n');
+  const defs = new Map<string, MdDefinition>();
+  for (const b of blocks) {
+    for (const [k, v] of collectDefinitions(b.node as { children?: unknown[] })) defs.set(k, v);
+  }
+  return blocks.map((b) => renderBlockHtml(b, defs)).filter((h) => h !== '').join('\n');
 }

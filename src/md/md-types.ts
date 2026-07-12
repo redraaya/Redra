@@ -52,6 +52,17 @@ export function mdRootOf(id: string): string | null {
   return match ? match[1]! : null;
 }
 
+/** "c1-4" → "c1"; "c1" → "c1"; not a clone id → null. */
+export function cloneRootOf(id: string): string | null {
+  const match = /^(c\d+)(?:-\d+)?$/.exec(id);
+  return match ? match[1]! : null;
+}
+
+/** Root of any md OR clone id ("m3-7"→"m3", "c1-4"→"c1"), else null. */
+export function anyRootOf(id: string): string | null {
+  return mdRootOf(id) ?? cloneRootOf(id);
+}
+
 /** Block index for an md id ("m3-7" → 3), or null. */
 export function mdBlockIndexOf(id: string): number | null {
   const root = mdRootOf(id);
