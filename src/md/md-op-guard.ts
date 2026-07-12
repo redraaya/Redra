@@ -134,12 +134,14 @@ export function guardMdPush(
       return { ok: false, error: `"${id}" is inside an edited/deleted block`, code: 'blocked-subtree' };
     }
   }
-  // Nested/clone-referencing ops: the cheap prefix rule can't express
-  // "descendant of m3-2", so confirm the whole sequence applies.
-  const referencesNested = /-\d+$/.test(checked.op.id) || cloneRootOf(checked.op.id) !== null;
-  if (referencesNested) {
-    const applied = dryRun(doc, [...activeOps, checked.op]);
-    if (!applied.ok) return { ok: false, error: applied.error, code: 'blocked-subtree' };
-  }
+  // Authoritative check: confirm the whole sequence actually APPLIES before
+  // accepting the push. The cheap prefix rule can't express "descendant of
+  // m3-2", and a top-level editText can target a block that renders to nothing
+  // (a reference definition) — which passes shape validation but throws at
+  // materialize. The dry-run rejects both cleanly instead of green-lighting an
+  // op that would fail at save. (moveBlock/deleteBlock/editText all materialize
+  // or splice; run it for every mutating op.)
+  const applied = dryRun(doc, [...activeOps, checked.op]);
+  if (!applied.ok) return { ok: false, error: applied.error, code: 'blocked-subtree' };
   return checked;
 }

@@ -23,7 +23,7 @@ import { renderBlockHtml } from './md-render.js';
 import { writeElementMarkdown } from './md-writer.js';
 import type { MdFlavor } from './md-flavor.js';
 import { RICH_DEFAULTS } from './md-flavor.js';
-import { mdBlockIndexOf, mdRootOf } from './md-types.js';
+import { mdRootOf } from './md-types.js';
 import type { MdDoc } from './md-types.js';
 
 type P5Node = DefaultTreeAdapterMap['node'];
@@ -39,12 +39,21 @@ export class MdOpError extends Error {}
 
 /** One entry in the working block table. */
 interface Entry {
+  /** Stable identity: the block's root stamp ("m<i>" or a clone "c<n>"). Ops
+   *  resolve to their entry by this, NOT by table position — a clone/move
+   *  splice must not make a later op edit the wrong block (id-stability). */
+  rootId: string;
+  /** Original pristine block index this entry materializes from (-1 = clone,
+   *  which materializes by parsing its own `pristine` bytes). */
+  blockIndex: number;
   /** Present until the block is materialized; then its bytes come from the tree. */
   pristine: string | null;
   /** Parsed fragment whose single root element carries the block's stamps. */
   live: P5Element | null;
   removed: boolean;
-  /** The gap that PRECEDES this entry (gaps[i]); the trailing gap is separate. */
+  /** The gap that PRECEDED this entry at its ORIGINAL position. Gaps are
+   *  emitted POSITIONALLY at serialize time (not carried across a move), so
+   *  this is only consulted for entries that never left their run. */
   gapBefore: string;
 }
 
@@ -59,12 +68,16 @@ function findById(root: P5Parent, id: string): P5Element | null {
   return null;
 }
 
-function materialize(entry: Entry, blockIndex: number, doc: MdDoc): P5Element {
+function materialize(entry: Entry, doc: MdDoc): P5Element {
   if (entry.live) return entry.live;
-  const html = renderBlockHtml(doc.blocks[blockIndex]!);
+  // A pristine top-level block re-renders from its source (ids match the live
+  // DOM by the render id-invariant); a clone entry has no doc block, so it
+  // parses its own bytes instead.
+  const html =
+    entry.blockIndex >= 0 ? renderBlockHtml(doc.blocks[entry.blockIndex]!) : (entry.pristine ?? '');
   const fragment = parseFragment(html);
   const root = (fragment.childNodes ?? []).find(isElement);
-  if (!root) throw new MdOpError(`block m${blockIndex} did not materialize`);
+  if (!root) throw new MdOpError(`block ${entry.rootId} did not materialize`);
   entry.live = root as P5Element;
   entry.pristine = null;
   return entry.live;
@@ -85,41 +98,42 @@ function applyEditText(el: P5Element, html: string): void {
  */
 export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
   const table: Entry[] = doc.blocks.map((b, i) => ({
+    rootId: b.rootId,
+    blockIndex: i,
     pristine: doc.source.slice(b.span.start, b.span.end),
     live: null,
     removed: false,
     gapBefore: doc.gaps[i]!,
   }));
   const trailingGap = doc.gaps[doc.blocks.length]!;
-  // Clone minting continues the HTML "c<n>" namespace (disjoint from m<n>).
-  let cloneCounter = 0;
 
-  const rootIndex = (id: string): number => {
-    const idx = mdBlockIndexOf(id);
-    if (idx === null || idx < 0 || idx >= table.length || table[idx]!.removed) {
-      throw new MdOpError(`op targets unknown/removed block: ${id}`);
-    }
+  /** Resolve an op's id to its entry's CURRENT table index BY IDENTITY — never
+   *  by the id-derived position, which drifts after a clone/move splice. */
+  const resolveIndex = (id: string): number => {
+    const root = mdRootOf(id);
+    if (root === null) throw new MdOpError(`op targets a non-md id: ${id}`);
+    const idx = table.findIndex((e) => !e.removed && e.rootId === root);
+    if (idx < 0) throw new MdOpError(`op targets unknown/removed block: ${id}`);
     return idx;
   };
 
   for (const op of ops) {
     switch (op.type) {
       case 'editText': {
-        const idx = rootIndex(op.id);
-        const root = materialize(table[idx]!, idx, doc);
+        const idx = resolveIndex(op.id);
+        const root = materialize(table[idx]!, doc);
         const target = getId(root) === op.id ? root : findById(root as unknown as P5Parent, op.id);
         if (!target) throw new MdOpError(`editText: id not in its block: ${op.id}`);
         applyEditText(target, op.html);
         break;
       }
       case 'deleteBlock': {
-        const idx = rootIndex(op.id);
-        const rootId = mdRootOf(op.id);
-        if (op.id === rootId) {
+        const idx = resolveIndex(op.id);
+        if (op.id === table[idx]!.rootId) {
           // Top-level: drop the whole entry (bytes leave with it).
           table[idx]!.removed = true;
         } else {
-          const root = materialize(table[idx]!, idx, doc);
+          const root = materialize(table[idx]!, doc);
           const target = findById(root as unknown as P5Parent, op.id);
           if (!target) throw new MdOpError(`deleteBlock: id not in its block: ${op.id}`);
           detach(target);
@@ -127,29 +141,29 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
         break;
       }
       case 'moveBlock': {
-        // v1: only nested (within-block) moves are exercised by the editing
-        // layer for MD (block reorder among top-level blocks arrives here too
-        // and is handled by splicing the entry). Top-level move:
-        const idx = rootIndex(op.id);
-        const rootId = mdRootOf(op.id);
-        if (op.id === rootId) {
-          const beforeIdx = op.beforeId === null ? table.length : rootIndex(op.beforeId);
+        const idx = resolveIndex(op.id);
+        if (op.id === table[idx]!.rootId) {
+          // Top-level reorder: splice the entry. Gaps are positional (fixed up
+          // at serialize time), so the entry travels WITHOUT its gapBefore.
+          const beforeIdx = op.beforeId === null ? table.length : resolveIndex(op.beforeId);
           moveEntry(table, idx, beforeIdx);
         } else {
-          const root = materialize(table[idx]!, idx, doc);
+          const root = materialize(table[idx]!, doc);
           moveNested(root as unknown as P5Parent, op.id, op.beforeId);
         }
         break;
       }
       case 'cloneBlock': {
-        const idx = rootIndex(op.id);
-        cloneCounter++;
-        // Top-level clone: duplicate the pristine slice as a new entry right
-        // after the original, separated by a blank-line gap.
+        const idx = resolveIndex(op.id);
+        // Top-level clone: duplicate the block as a new entry right after the
+        // original. Its rootId is the minted cloneId; it materializes from its
+        // own bytes (blockIndex -1). The positional gap rule gives it a real
+        // separator at serialize time.
         const entry = table[idx]!;
-        const bytes =
-          entry.pristine ?? writeElementMarkdown(entry.live!, RICH_DEFAULTS, doc.eol);
+        const bytes = entry.pristine ?? writeElementMarkdown(entry.live!, RICH_DEFAULTS, doc.eol);
         table.splice(idx + 1, 0, {
+          rootId: op.cloneId,
+          blockIndex: -1,
           pristine: bytes,
           live: null,
           removed: false,
@@ -162,8 +176,9 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
     }
   }
 
-  // Stash the trailing gap on a sentinel so serialize can find it.
-  (table as unknown as { trailingGap: string }).trailingGap = trailingGap;
+  // Stash the head + trailing gaps on a sentinel so serialize can find them.
+  (table as unknown as { trailingGap: string; headGap: string }).trailingGap = trailingGap;
+  (table as unknown as { headGap: string }).headGap = doc.gaps[0]!;
   return table;
 }
 
@@ -199,14 +214,21 @@ function moveNested(root: P5Parent, id: string, beforeId: string | null): void {
 export function serializeMdSource(doc: MdDoc, ops: readonly Op[], flavor: MdFlavor): string {
   if (ops.length === 0) return doc.source; // byte-identical shortcut
   const table = applyMdOps(doc, ops);
-  const trailingGap = (table as unknown as { trailingGap: string }).trailingGap;
+  const { trailingGap, headGap } = table as unknown as { trailingGap: string; headGap: string };
   let out = '';
   let first = true;
   for (const entry of table) {
     if (entry.removed) continue;
-    // The first surviving entry keeps its gapBefore (document head); a
-    // removed leading entry's gap is dropped with it (its bytes are gone).
-    out += first ? entry.gapBefore : entry.gapBefore;
+    // Gaps are POSITIONAL, not owned by the block: the first surviving entry
+    // emits the document head (gaps[0]); every later entry emits its original
+    // separator when it still HAS one (contains a newline → an unmoved run,
+    // kept byte-faithful), else a synthesized blank line (it came from the head
+    // and needs a real separator now — the fix for glued/leaked-gap moves).
+    if (first) {
+      out += headGap;
+    } else {
+      out += /\n/.test(entry.gapBefore) ? entry.gapBefore : doc.eol + doc.eol;
+    }
     first = false;
     if (entry.live) {
       out += writeElementMarkdown(entry.live, flavor, doc.eol);

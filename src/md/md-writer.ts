@@ -21,6 +21,7 @@
  */
 import { parseFragment } from 'parse5';
 import type { DefaultTreeAdapterMap } from 'parse5';
+import { isSafeUrl } from './md-render.js';
 import type { MdFlavor } from './md-flavor.js';
 
 type P5Node = DefaultTreeAdapterMap['node'];
@@ -77,22 +78,57 @@ function linkDest(url: string): string {
   return url;
 }
 
-/** Serialize an island subtree back to HTML, dropping data-redra-* stamps.
- *  Vocabulary is already sanitized, so emitting tags verbatim is safe. */
+/**
+ * Serialize an island subtree back to HTML for the .md file. The writer is
+ * the SAVE GATE: an editText payload on an island bypasses render-time
+ * sanitization, so this must RE-SANITIZE — drop dangerous elements and every
+ * attribute not on the safe allowlist (no on*, no style, no javascript:/data:
+ * urls, no forged stamps). Emitting island markup verbatim was a live
+ * writer-gate bypass (Stage-1/2 red-team).
+ */
+const ISLAND_DROP_TAGS = new Set([
+  'script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed', 'link',
+  'meta', 'base', 'form', 'input', 'button', 'select', 'textarea', 'video',
+  'audio', 'source', 'track', 'canvas', 'svg', 'math', 'template', 'slot', 'dialog',
+]);
+const ISLAND_VOID_TAGS = new Set(['br', 'img', 'hr', 'wbr', 'col']);
+const ISLAND_LANG_CLASS = /^language-[a-zA-Z0-9#+_.-]{1,32}$/;
+
+function islandAttrString(node: P5Element): string {
+  const kept: string[] = [];
+  for (const a of node.attrs) {
+    const name = a.name.toLowerCase();
+    if (name.startsWith('data-redra-') || name.startsWith('on') || name === 'style') continue;
+    if ((name === 'href' || name === 'src') && !isSafeUrl(a.value)) continue;
+    const allowed =
+      name === 'href' || name === 'src' || name === 'alt' || name === 'title' ||
+      name === 'open' || name === 'colspan' || name === 'rowspan' ||
+      ((name === 'start' || name === 'colspan' || name === 'rowspan') && /^\d{1,6}$/.test(a.value));
+    if (name === 'class') {
+      const filtered = a.value
+        .split(/\s+/)
+        .filter((c) => ISLAND_LANG_CLASS.test(c))
+        .join(' ');
+      if (filtered !== '') kept.push(` class="${filtered}"`);
+      continue;
+    }
+    if (!allowed) continue;
+    kept.push(` ${name}="${a.value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"`);
+  }
+  return kept.join('');
+}
+
 function islandHtml(node: P5Node): string {
   if (isText(node)) {
     return node.value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
   if (!isElement(node)) return '';
-  const attrs = node.attrs
-    .filter((a) => !a.name.startsWith('data-redra-'))
-    .map((a) => ` ${a.name}="${a.value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"`)
-    .join('');
+  const tag = node.tagName.toLowerCase();
+  if (ISLAND_DROP_TAGS.has(tag)) return ''; // subtree dropped, security-critical
+  const attrs = islandAttrString(node);
   const inner = (node.childNodes ?? []).map(islandHtml).join('');
-  if (node.tagName === 'br' || node.tagName === 'img' || node.tagName === 'hr') {
-    return `<${node.tagName}${attrs}>`;
-  }
-  return `<${node.tagName}${attrs}>${inner}</${node.tagName}>`;
+  if (ISLAND_VOID_TAGS.has(tag)) return `<${tag}${attrs}>`;
+  return `<${tag}${attrs}>${inner}</${tag}>`;
 }
 
 // --- inline writer -------------------------------------------------------------
@@ -135,12 +171,18 @@ function writeInlineNode(node: P5Node, ctx: Ctx): string {
     case 'mark':
       return wrapNonEmpty(writeInlineChildren(node, ctx), '==');
     case 'sub':
-    case 'sup': {
-      const inner = writeInlineChildren(node, ctx);
-      return inner === '' ? '' : `<${node.tagName}>${inner}</${node.tagName}>`;
-    }
+      return writeInlineChildren(node, ctx) === ''
+        ? ''
+        : `<sub>${writeInlineChildren(node, ctx)}</sub>`;
+    case 'sup':
+      // A footnote reference renders as <sup class="md-fnref">label</sup> — it
+      // must round-trip to [^label], not literal <sup> HTML (data loss).
+      if (hasClass(node, 'md-fnref')) return `[^${textContent(node)}]`;
+      return writeInlineChildren(node, ctx) === ''
+        ? ''
+        : `<sup>${writeInlineChildren(node, ctx)}</sup>`;
     case 'code':
-      return hasClass(node, 'md-fnref') ? '' : codeSpan(textContent(node));
+      return codeSpan(textContent(node));
     case 'span':
       if (hasClass(node, 'md-math')) return `$${textContent(node)}$`;
       return writeInlineChildren(node, ctx); // plain span: transparent
@@ -154,8 +196,6 @@ function writeInlineNode(node: P5Node, ctx: Ctx): string {
       const alt = (attr(node, 'alt') ?? '').replace(/([[\]\\])/g, '\\$1');
       return `![${alt}](${linkDest(attr(node, 'src') ?? '')})`;
     }
-    case 'sup':
-      return ''; // unreachable (handled above); satisfies exhaustiveness readers
     case 'br':
       // Single <br> = hard break; the paragraph writer turns <br><br> into a
       // paragraph split before inline writing ever sees them.
@@ -236,17 +276,47 @@ function writeListItems(list: P5Element, ctx: Ctx, indent: string): string[] {
         : '[ ] '
       : '';
     const contIndent = indent + ' '.repeat(marker.length);
-    const inlineParts: P5Node[] = [];
-    const nested: P5Element[] = [];
+    // A list item is a sequence of BLOCKS: a loose item has real <p> children
+    // (the renderer keeps them), a tight item has bare inline runs. Each block
+    // is emitted as its own paragraph so two <p> never fuse ("parasecond") -
+    // continuation paragraphs get a blank line and the continuation indent;
+    // nested lists recurse with that indent.
+    let inlineRun: P5Node[] = [];
+    let firstBlock = true;
+    const emitParagraph = (text: string): void => {
+      if (text === '') return;
+      const body = text.split(ctx.eol).join(ctx.eol + contIndent); // indent wrapped lines
+      if (firstBlock) {
+        lines.push(`${indent}${marker}${task}${body}`);
+        firstBlock = false;
+      } else {
+        lines.push(''); // blank line before a loose continuation paragraph
+        lines.push(contIndent + body);
+      }
+    };
+    const flushInline = (): void => {
+      if (inlineRun.length === 0) return;
+      const fake: P5Element = { ...child, childNodes: inlineRun } as P5Element;
+      emitParagraph(writeParagraphLines(fake, ctx));
+      inlineRun = [];
+    };
     for (const c of child.childNodes ?? []) {
-      if (isElement(c) && (c.tagName === 'ul' || c.tagName === 'ol')) nested.push(c);
-      else inlineParts.push(c);
+      if (isElement(c) && (c.tagName === 'ul' || c.tagName === 'ol')) {
+        flushInline();
+        if (firstBlock) {
+          lines.push(`${indent}${marker}${task}`.replace(/\s+$/, ''));
+          firstBlock = false;
+        }
+        lines.push(...writeListItems(c, ctx, contIndent)); // already contIndent-ed
+      } else if (isElement(c) && c.tagName === 'p') {
+        flushInline();
+        emitParagraph(writeParagraphLines({ ...c } as P5Element, ctx));
+      } else {
+        inlineRun.push(c);
+      }
     }
-    const fake: P5Element = { ...child, childNodes: inlineParts } as P5Element;
-    const text = writeParagraphLines(fake, ctx) || '';
-    const own = `${indent}${marker}${task}${text.split(ctx.eol + ctx.eol).join(ctx.eol + contIndent)}`;
-    lines.push(own);
-    for (const sub of nested) lines.push(...writeListItems(sub, ctx, contIndent));
+    flushInline();
+    if (firstBlock) lines.push(`${indent}${marker}${task}`.replace(/\s+$/, '')); // empty item
   }
   return lines;
 }
@@ -301,7 +371,11 @@ function writeBlockElement(el: P5Element, ctx: Ctx): string {
   const tag = el.tagName;
   if (/^h[1-6]$/.test(tag)) {
     const level = Number(tag[1]);
-    return `${'#'.repeat(level)} ${writeInlineChildren(el, ctx).split(ctx.eol).join(' ')}`;
+    let text = writeInlineChildren(el, ctx).split(ctx.eol).join(' ');
+    // A trailing " #" run would be read as an ATX CLOSING sequence on re-parse,
+    // silently dropping it — escape it so the heading keeps its literal text.
+    text = text.replace(/(\s)(#+)(\s*)$/, (_m, ws, hashes, sp) => `${ws}\\${hashes}${sp}`);
+    return `${'#'.repeat(level)} ${text}`;
   }
   switch (tag) {
     case 'p':
