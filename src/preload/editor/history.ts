@@ -27,7 +27,9 @@ export type HistoryEntry =
       oldNext: Node | null;
       /** node.nextSibling after the move, for redo. */
       newNext: Node | null;
-    };
+    }
+  /** Block-type change: the old element was replaced in place by the new one. */
+  | { kind: 'replaceBlock'; oldNode: Element; newNode: Element };
 
 /** Apply an entry's DOM INVERSE (the undo direction). Shared by undo() and
  *  discardEntry() so a rejected push reverts exactly like a normal undo. */
@@ -48,6 +50,9 @@ function invertEntry(entry: HistoryEntry): void {
     case 'setAttr':
       if (entry.prevValue === null) entry.el.removeAttribute(entry.name);
       else entry.el.setAttribute(entry.name, entry.prevValue);
+      break;
+    case 'replaceBlock':
+      entry.newNode.replaceWith(entry.oldNode); // undo = restore the old block
       break;
   }
 }
@@ -141,6 +146,9 @@ export class LocalHistory {
         break;
       case 'setAttr':
         entry.el.setAttribute(entry.name, entry.newValue);
+        break;
+      case 'replaceBlock':
+        entry.oldNode.replaceWith(entry.newNode); // redo = re-apply the new block
         break;
     }
     return true;

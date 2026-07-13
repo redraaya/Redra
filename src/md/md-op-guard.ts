@@ -72,6 +72,19 @@ export function validateMdOp(raw: unknown, doc: MdDoc, mintedClones: ReadonlySet
         return { ok: false, error: `unknown beforeId: ${beforeId}`, code: 'invalid' };
       return { ok: true, op: { type: 'moveBlock', id: op.id, beforeId: (beforeId ?? null) as string | null } };
     }
+    case 'replaceBlock':
+      // Block-type change ("Turn into …"): replace the whole block with a new
+      // stamped element. Top-level ids only (v1) — a nested id has no standalone
+      // block to swap.
+      if (typeof op.html !== 'string')
+        return { ok: false, error: 'replaceBlock missing html', code: 'invalid' };
+      if (op.html.length > MAX_EDIT_HTML_LENGTH)
+        return { ok: false, error: `replaceBlock html exceeds ${MAX_EDIT_HTML_LENGTH}`, code: 'invalid' };
+      if (mdRootOf(op.id) !== op.id && cloneRootOf(op.id) !== op.id)
+        return { ok: false, error: `replaceBlock needs a top-level block id: ${op.id}`, code: 'invalid' };
+      if (!rootIndexKnown(op.id))
+        return { ok: false, error: `no such block: ${op.id}`, code: 'invalid' };
+      return { ok: true, op: { type: 'replaceBlock', id: op.id, html: op.html } };
     case 'setAttr':
       // Image replacement is intentionally disabled for md (plan §1.5).
       return { ok: false, error: 'setAttr is not supported for Markdown', code: 'invalid' };

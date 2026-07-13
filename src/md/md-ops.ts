@@ -188,6 +188,18 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
         });
         break;
       }
+      case 'replaceBlock': {
+        // Swap the whole block for a new stamped element (block-type change).
+        // The writer serializes entry.live to the new markdown; stamps in the
+        // payload are ignored by the writer, unsafe content is gated there.
+        const idx = resolveIndex(op.id);
+        const fragment = parseFragment(op.html);
+        const root = (fragment.childNodes ?? []).find(isElement);
+        if (!root) throw new MdOpError(`replaceBlock: no root element in payload for ${op.id}`);
+        table[idx]!.live = root;
+        table[idx]!.pristine = null;
+        break;
+      }
       case 'setAttr':
         throw new MdOpError('setAttr is not supported for Markdown documents');
     }
