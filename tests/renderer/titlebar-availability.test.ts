@@ -49,6 +49,7 @@ beforeAll(async () => {
     onDirtyChanged: () => {},
     onModeChanged: () => {},
     newFile: () => Promise.resolve(),
+    copyTelegram: () => {},
     onNotice: () => {},
     onUpdateAvailable: () => {},
     onFindOpen: () => {},
@@ -80,7 +81,7 @@ beforeAll(async () => {
 });
 
 const openDoc = (): void =>
-  onDocOpened({ name: 'report.html', path: '/tmp/report.html' } as DocOpenedInfo);
+  onDocOpened({ name: 'report.html', path: '/tmp/report.html', format: 'html' } as DocOpenedInfo);
 
 describe('titlebar undo/redo visibility', () => {
   it('a freshly opened document hides undo AND redo', () => {

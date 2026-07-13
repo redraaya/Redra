@@ -120,6 +120,15 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
       enabled: docOpen,
       click: () => handlers.exportPdf(),
     },
+    {
+      // Lives NEXT TO the PDF export — both are "hand the document onward"
+      // actions (user feedback); Markdown documents only.
+      id: 'file-copy-telegram',
+      label: t('menu.copyTelegram'),
+      accelerator: 'CmdOrCtrl+Alt+C',
+      enabled: docOpen && (options.isMarkdown ?? false),
+      click: () => handlers.copyTelegram(),
+    },
     { type: 'separator' },
     {
       id: 'file-version-history',
@@ -166,13 +175,6 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
       { role: 'paste', label: t('menu.paste') },
       { role: 'selectAll', label: t('menu.selectAll') },
       { type: 'separator' },
-      {
-        id: 'edit-copy-telegram',
-        label: t('menu.copyTelegram'),
-        accelerator: 'CmdOrCtrl+Alt+C',
-        enabled: docOpen && (options.isMarkdown ?? false),
-        click: () => handlers.copyTelegram(),
-      },
       {
         id: 'edit-find',
         label: t('menu.find'),

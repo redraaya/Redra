@@ -828,7 +828,7 @@ async function openDocument(filePath: string, prefer?: WindowContext): Promise<O
 
     const name = path.basename(opened.filePath);
     if (!ctx.win.isDestroyed()) ctx.win.setTitle(`${name} — Redra`);
-    sendToShell(ctx, 'doc:opened', { path: opened.filePath, name });
+    sendToShell(ctx, 'doc:opened', { path: opened.filePath, name, format: opened.format });
     broadcastDirty(ctx);
     // A fresh document always starts in live editing, never in Preview.
     setPreview(ctx, false);
@@ -882,7 +882,7 @@ async function newFile(prefer?: WindowContext): Promise<OpenResult> {
 
     const name = path.basename(opened.filePath);
     if (!ctx.win.isDestroyed()) ctx.win.setTitle(`${name} — Redra`);
-    sendToShell(ctx, 'doc:opened', { path: opened.filePath, name });
+    sendToShell(ctx, 'doc:opened', { path: opened.filePath, name, format: opened.format });
     broadcastDirty(ctx); // clean but savable → Save enabled, no dirty dot
     setPreview(ctx, false);
     void rebuildAppMenu();
@@ -965,6 +965,10 @@ function registerIpc(): void {
     const ctx = shellCtx(event);
     if (!ctx) return { ok: false, error: 'bad sender' } satisfies ExportResult;
     return ctx.saveFlow.exportPdf();
+  });
+  ipcMain.on('doc:copyTelegram', (event) => {
+    const ctx = shellCtx(event);
+    if (ctx) void copyForTelegram(ctx);
   });
   ipcMain.on('mode:toggle', (event) => {
     const ctx = shellCtx(event);

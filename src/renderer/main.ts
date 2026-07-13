@@ -32,6 +32,7 @@ const updateClose = $('update-close') as HTMLButtonElement;
 const btnUndo = $('btn-undo') as HTMLButtonElement;
 const btnRedo = $('btn-redo') as HTMLButtonElement;
 const btnPreview = $('btn-preview') as HTMLButtonElement;
+const btnTelegram = $('btn-telegram') as HTMLButtonElement;
 const btnPdf = $('btn-pdf') as HTMLButtonElement;
 const btnSave = $('btn-save') as HTMLButtonElement;
 const btnTheme = $('btn-theme') as HTMLButtonElement;
@@ -74,6 +75,7 @@ findInput.placeholder = t('shell.findPlaceholder');
 tipA11y(findPrev, t('shell.findPrev'));
 tipA11y(findNext, t('shell.findNext'));
 tipA11y(findClose, t('shell.findClose'));
+tipA11y(btnTelegram, t('shell.telegramTooltip'));
 tipA11y(btnPdf, t('shell.pdfTooltip'));
 tipA11y(btnSave, t('shell.saveTooltip'));
 dirtyDot.title = t('shell.dirtyTooltip');
@@ -127,7 +129,7 @@ void redra.getSettings().then((s) => applyTheme(s.shellTheme));
 // IPC by the doc view once a document is open. Tip text = each button's
 // aria-label. Only the titlebar icons — never the block handle or format bar.
 initTitlebarTooltips(
-  [btnOpen, btnFind, btnUndo, btnRedo, btnPreview, btnPdf, btnSave, btnTheme, findPrev, findNext, findClose],
+  [btnOpen, btnFind, btnUndo, btnRedo, btnPreview, btnTelegram, btnPdf, btnSave, btnTheme, findPrev, findNext, findClose],
   {
     isDocMode: () => document.body.dataset['state'] === 'doc',
     showOverDoc: (info) => redra.tipShow(info),
@@ -142,6 +144,7 @@ btnOpen.addEventListener('click', () => void redra.openFileDialog());
 btnUndo.addEventListener('click', () => redra.undo());
 btnRedo.addEventListener('click', () => redra.redo());
 btnPreview.addEventListener('click', () => redra.togglePreview());
+btnTelegram.addEventListener('click', () => redra.copyTelegram());
 btnPdf.addEventListener('click', () => void redra.exportPdf());
 btnSave.addEventListener('click', () => void redra.save());
 
@@ -239,6 +242,8 @@ redra.onDocOpened((info) => {
   // Start screen → doc state: theme button yields to the document actions.
   btnTheme.hidden = true;
   for (const b of [btnFind, btnPreview, btnPdf, btnSave]) b.hidden = false;
+  // Markdown-only action, right next to the PDF export (user feedback).
+  btnTelegram.hidden = info.format !== 'md';
   // Undo/redo are NOT shown on doc open: a fresh document has an empty history,
   // so both stay hidden until onEditAvailability reports something is possible
   // (the editing layer emits on arm + every change). The first edit reveals

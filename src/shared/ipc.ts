@@ -89,6 +89,8 @@ export interface PerfEntry {
   detail?: Record<string, number>;
 }
 
+import type { DocFormat } from './doc-types.js';
+
 export type OpenResult =
   | { ok: true; path: string; name: string }
   | { ok: false; canceled?: boolean; error?: string };
@@ -125,6 +127,8 @@ export interface RecentEntry {
 export interface DocOpenedInfo {
   path: string;
   name: string;
+  /** 'md' shows the markdown-only titlebar actions (Copy for Telegram). */
+  format: DocFormat;
 }
 
 export interface DirtyState {
@@ -278,6 +282,8 @@ export interface RedraShellApi {
   save(): Promise<SaveResult>;
   saveAs(): Promise<SaveResult>;
   exportPdf(): Promise<ExportResult>;
+  /** Titlebar Telegram button (md only): both clipboard flavors + toast. */
+  copyTelegram(): void;
   /** Flip Preview — main owns the state and answers with 'mode:changed'. */
   togglePreview(): void;
   /** Undo/redo the focused window's document — main routes to its doc view

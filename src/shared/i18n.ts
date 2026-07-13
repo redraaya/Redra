@@ -131,6 +131,7 @@ const STRINGS = {
   'shell.undoTooltip': { ru: 'Отменить (⌘Z)', en: 'Undo (⌘Z)' },
   'shell.redoTooltip': { ru: 'Повторить (⇧⌘Z)', en: 'Redo (⇧⌘Z)' },
   'shell.previewTooltip': { ru: 'Просмотр (⌘E)', en: 'Preview (⌘E)' },
+  'shell.telegramTooltip': { ru: 'Скопировать для Telegram (⌥⌘C)', en: 'Copy for Telegram (⌥⌘C)' },
   'shell.pdfTooltip': { ru: 'Экспорт в PDF… (⇧⌘E)', en: 'Export to PDF… (⇧⌘E)' },
   'shell.saveTooltip': { ru: 'Сохранить (⌘S)', en: 'Save (⌘S)' },
   'shell.dirtyTooltip': { ru: 'Есть несохранённые изменения', en: 'Unsaved changes' },

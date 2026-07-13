@@ -25,6 +25,9 @@ const api: RedraShellApi = {
   save: () => ipcRenderer.invoke('doc:save') as Promise<SaveResult>,
   saveAs: () => ipcRenderer.invoke('doc:saveAs') as Promise<SaveResult>,
   exportPdf: () => ipcRenderer.invoke('doc:exportPdf') as Promise<ExportResult>,
+  copyTelegram: () => {
+    ipcRenderer.send('doc:copyTelegram');
+  },
   togglePreview: () => ipcRenderer.send('mode:toggle'),
   undo: () => ipcRenderer.send('edit:undo'),
   redo: () => ipcRenderer.send('edit:redo'),
