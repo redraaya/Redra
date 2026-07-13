@@ -17,15 +17,18 @@ split-screen preview, no broken formatting. Or export it to PDF.
 **New in v0.5.0 — Markdown mode:**
 
 - **Edit Markdown the way you read it.** Open a `.md` file and Redra renders it
-  as a clean document — warm paper, real headings, quiet quotes — then lets you
-  click into it and write. You edit exactly what you see; there is no raw-code
-  pane and no `==syntax==` on screen. On save, only the blocks you touched are
-  re-written — every untouched block and blank line is preserved byte-for-byte.
-- **The full Telegram formatting set, in two tiers.** Select text and a quick
-  toolbar offers bold, italic, underline, strikethrough, spoiler, code and
-  links. Tap **More** for the rest — highlight, super/subscript, headings,
-  lists, checklists, quotes, code blocks — each shown as a **visual preview of
-  the result**, not a cheat-sheet of symbols.
+  as a clean document — warm paper, real headings, quiet quotes — and the whole
+  document is simply text: click anywhere and type, press Enter for a new
+  paragraph or list item, edit code blocks in place, tick the checkboxes.
+  There is no raw-code pane and no `==syntax==` on screen. On save, only the
+  blocks you touched are re-written — every untouched block and blank line is
+  preserved byte-for-byte.
+- **The full Telegram formatting set, right there.** Select text and a
+  two-row toolbar appears: inline formats on top (bold, italic, underline,
+  strikethrough, spoiler, code, links), block types right below (headings,
+  lists, checklists, quotes, code blocks, divider) — plus **More** for
+  highlight and super/subscript, shown as **visual previews of the result**,
+  not a cheat-sheet of symbols.
 - **Copy for Telegram (⌥⌘C).** Write a post in Redra and paste it straight into
   Telegram with formatting intact — the clipboard carries both Telegram's rich
   HTML and MarkdownV2.
@@ -166,10 +169,12 @@ Once installed, Redra shows up in Finder's "Open With…" menu for `.html` and
 Markdown mode (v0.5), specifically:
 
 - **Byte-fidelity is per top-level block.** Untouched blocks and the blank
-  lines between them are preserved exactly; editing *inside* a block (a list, a
-  table) canonicalizes just that one block, in your file's detected style.
-- **Enter inside a block is a line break**; a brand-new paragraph is
-  materialized when you save.
+  lines between them are preserved exactly; a block you did edit (a list, a
+  table) is rewritten as a whole, in your file's detected style.
+- **Markdown is text, not blocks.** There are no drag handles or block
+  duplication in `.md` documents — move a paragraph by cutting and pasting it,
+  like in any text editor. (HTML documents keep their handles: there the
+  blocks are real.)
 - **Image replacement is off in Markdown** (embedding base64 would fight the
   format), and Mermaid / custom emoji / Telegram-specific extras aren't
   rendered yet.
