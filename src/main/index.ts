@@ -747,9 +747,12 @@ function commitActiveEdit(ctx: WindowContext): Promise<boolean> {
       ipcMain.removeListener('edit:committed', onReply);
       resolve(acked);
     };
-    const onReply = (event: IpcMainEvent, replyNonce: unknown): void => {
+    const onReply = (event: IpcMainEvent, replyNonce: unknown, ok: unknown): void => {
       if (!senderMatches(event, wc) || replyNonce !== nonce) return;
-      done(true);
+      // ok === false → the commit round-tripped but was REJECTED (e.g. body
+      // over the cap): treat like a missed commit so a dirty md save fails
+      // loudly. Absent/true (html path, old acks) → accepted.
+      done(ok !== false);
     };
     const timer = setTimeout(() => {
       console.warn('[edit] commit ack timed out — proceeding without it');

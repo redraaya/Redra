@@ -193,12 +193,16 @@ function renderNode(node: AnyNode, s: RenderState): string {
       return '<br>';
     case 'link': {
       const href = node.url && isSafeUrl(node.url) ? escapeHtml(node.url) : '';
-      return `<a href="${href}">${renderChildren(node, s)}</a>`;
+      // The title rides along so the writer can round-trip '[t](url "Title")'
+      // when an edit rewrites the block (otherwise silently lossy).
+      const title = node.title ? ` title="${escapeHtml(node.title)}"` : '';
+      return `<a href="${href}"${title}>${renderChildren(node, s)}</a>`;
     }
     case 'image': {
       const id = stampId(s);
       const src = node.url && isSafeUrl(node.url) ? escapeHtml(node.url) : '';
-      return `<img data-redra-id="${id}" src="${src}" alt="${escapeHtml(node.alt ?? '')}">`;
+      const title = node.title ? ` title="${escapeHtml(node.title)}"` : '';
+      return `<img data-redra-id="${id}" src="${src}" alt="${escapeHtml(node.alt ?? '')}"${title}>`;
     }
     case 'footnoteReference':
       return `<sup class="md-fnref">${escapeHtml(node.label ?? node.identifier ?? '')}</sup>`;

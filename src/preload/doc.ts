@@ -92,10 +92,16 @@ ipcRenderer.on('tip:show', (_event, info: TipInfo) => controller?.showTip(info.t
 ipcRenderer.on('tip:hide', () => controller?.hideTip());
 
 ipcRenderer.on('edit:commit', (_event, nonce: unknown) => {
-  const reply = (): void => ipcRenderer.send('edit:committed', nonce);
+  // The ack carries whether the commit was ACCEPTED (md: body stored by main;
+  // an over-cap rejection must NOT read as success — main fails the save
+  // loudly instead of silently writing a stale body).
+  const reply = (ok: boolean): void => ipcRenderer.send('edit:committed', nonce, ok);
   if (!controller) {
-    reply();
+    reply(true); // nothing to commit
     return;
   }
-  void controller.commitActive().finally(reply);
+  controller.commitActive().then(
+    (ok) => reply(ok),
+    () => reply(false),
+  );
 });

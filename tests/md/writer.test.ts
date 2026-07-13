@@ -144,3 +144,29 @@ describe('md-writer: the gate (unknown elements contribute text only)', () => {
     expect(out).toContain('<details><summary>с</summary>');
   });
 });
+
+const w = (html: string): string => writeBlockHtmlMarkdown(html, RICH_DEFAULTS, '\n');
+
+describe('review round 2: paste/edit artifacts', () => {
+  it('a div wrapping BLOCK children writes each child as its own block (VS Code paste)', () => {
+    expect(w('<div><div>line1</div><div>line2</div></div>')).toBe('line1\n\nline2');
+    expect(w('<div><p>alpha</p><p>beta</p></div>')).toBe('alpha\n\nbeta');
+    expect(w('<div><ul><li>a</li><li>b</li></ul></div>')).toBe('- a\n- b');
+  });
+
+  it('<br> inside a fence becomes a newline; inside a code span a space', () => {
+    expect(w('<pre><code>line1<br>line2</code></pre>')).toBe('```\nline1\nline2\n```');
+    expect(w('<p><code>x<br>y</code></p>')).toBe('`x y`');
+  });
+
+  it('a garbage <ol start> falls back to 1 (writer is the gate for pasted HTML)', () => {
+    expect(w('<ol start="9e99"><li>one</li></ol>')).toBe('1. one');
+    expect(w('<ol start="-5"><li>one</li></ol>')).toBe('1. one');
+    expect(w('<ol start="7"><li>one</li></ol>')).toBe('7. one');
+  });
+
+  it('link and image titles round-trip', () => {
+    expect(w('<p><a href="https://e.com" title="The manual">docs</a></p>')).toBe('[docs](https://e.com "The manual")');
+    expect(w('<p><img src="pic.png" alt="a" title="cap"></p>')).toBe('![a](pic.png "cap")');
+  });
+});

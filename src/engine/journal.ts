@@ -56,7 +56,10 @@ export class Journal {
   }
 
   /** Capture the current active ops as the saved state. */
-  markSaved(): void {
-    this.saved = this.ops;
+  markSaved(snapshot?: readonly Op[]): void {
+    // With a snapshot, exactly THOSE ops count as saved — an op pushed while
+    // the file write was in flight must keep the journal dirty (it is not in
+    // the written bytes). No snapshot = the current active ops (legacy call).
+    this.saved = snapshot ? [...snapshot] : this.ops;
   }
 }

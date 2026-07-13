@@ -131,4 +131,35 @@ describe('md-controller: whole-document editing', () => {
     p.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(document.querySelector('.handle, .indicator, .img-chip')).toBeNull();
   });
+
+  it('checkbox sync survives Preview (lifetime listener): attr/class stay coherent', () => {
+    controller.setEditing(false); // Preview — CSS makes boxes inert, but belt stays on
+    const li = document.getElementById('li1')!;
+    li.classList.add('md-task');
+    li.insertAdjacentHTML('afterbegin', '<input type="checkbox" contenteditable="false" tabindex="-1"> ');
+    const box = li.querySelector('input')!;
+    box.checked = true;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(box.hasAttribute('checked')).toBe(true);
+    expect(li.classList.contains('md-task-done')).toBe(true);
+  });
+
+  it('⌘Z on a pristine doc does NOT mark it dirty (no-op undo guard)', () => {
+    // jsdom has no queryCommandEnabled → the guard reads "nothing to undo".
+    controller.handleUndo();
+    controller.handleRedo();
+    expect(bridge.mdDirty).not.toHaveBeenCalled();
+  });
+
+  it('undo/redo are inert in Preview mode', () => {
+    controller.setEditing(false);
+    controller.handleUndo();
+    expect(bridge.mdDirty).not.toHaveBeenCalled();
+  });
+
+  it('commitActive resolves FALSE when main rejects the body (over-cap) — the ack must not read as success', async () => {
+    bridge.commitMdBody.mockResolvedValueOnce({ ok: false });
+    const ok = await controller.commitActive();
+    expect(ok).toBe(false);
+  });
 });

@@ -83,6 +83,7 @@ function filterAttrs(el: P5Element): void {
     else if (name === 'href' && tag === 'a' && isSafeUrl(attr.value)) kept.push(attr);
     else if (name === 'src' && tag === 'img' && isSafeUrl(attr.value)) kept.push(attr);
     else if (name === 'alt' && tag === 'img') kept.push(attr);
+    else if (name === 'title' && (tag === 'a' || tag === 'img')) kept.push(attr);
     else if (name === 'start' && tag === 'ol' && /^\d{1,6}$/.test(attr.value)) kept.push(attr);
     else if (name === 'open' && tag === 'details') kept.push(attr);
     else if (

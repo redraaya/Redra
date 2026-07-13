@@ -43,15 +43,39 @@ function getId(el: P5Element): string | undefined {
 }
 
 /**
+ * Strip VIEW-STATE attributes before comparison. `details.open` is one of the
+ * few properties Chromium reflects back into the ATTRIBUTE: merely clicking a
+ * disclosure to read it would otherwise fail the pristine equality and push
+ * the island through the writer — destroying source attributes the sanitizer
+ * stripped from the DOM (they exist only in the pristine bytes).
+ */
+function stripViewState(node: P5Node): void {
+  if (!isElement(node)) return;
+  if (node.tagName === 'details') {
+    node.attrs = node.attrs.filter((a) => a.name !== 'open');
+  }
+  for (const c of node.childNodes ?? []) stripViewState(c);
+}
+
+/**
  * Canonical comparison form of an HTML string's first element: parse5 parse →
  * serializeOuter. Both sides of the diff go through this exact fixpoint, so
  * source-form differences (entity spellings, attribute quoting) cancel out and
- * only real tree differences remain.
+ * only real tree differences remain. View-state attributes are normalized out.
  */
 export function roundtripOuter(html: string): string {
   const fragment = parseFragment(html);
   const el = (fragment.childNodes ?? []).find(isElement);
-  return el ? serializeOuter(el) : '';
+  if (!el) return '';
+  stripViewState(el);
+  return serializeOuter(el);
+}
+
+/** Comparison form of a LIVE parse5 element (already parsed from the body). */
+function compareOuter(el: P5Element): string {
+  // Round-trip through a string so both sides share the exact same pipeline
+  // (stripViewState mutates — never touch the caller's tree in place).
+  return roundtripOuter(serializeOuter(el));
 }
 
 /** One emitted piece: an untouched pristine block or writer output. */
@@ -106,7 +130,7 @@ export function serializeMdFromBody(doc: MdDoc, bodyHtml: string, flavor: MdFlav
       idx >= 0 &&
       idx < doc.blocks.length &&
       !seen.has(idx) && // a duplicated stamp (block pasted twice) is pristine ONCE
-      serializeOuter(node) === pristineCompare(idx)
+      compareOuter(node) === pristineCompare(idx)
     ) {
       seen.add(idx);
       pieces.push({ kind: 'pristine', idx });
@@ -152,29 +176,45 @@ export function serializeMdFromBody(doc: MdDoc, bodyHtml: string, flavor: MdFlav
   if (pieces.length === 0) return '';
 
   const BLANK_LINE = /\r?\n[ \t]*\r?\n/;
+  const INDENTED = /^(?: {4,}|\t)/; // indented-code / continuation-capturable slice
   let out = doc.gaps[0]!; // leading whitespace of the file — safe before any block
   let prevIdx: number | null = null;
   let first = true;
   for (const piece of pieces) {
     const currIdx = piece.kind === 'pristine' ? piece.idx : null;
+    const adjacent = prevIdx !== null && currIdx !== null && currIdx === prevIdx + 1;
     if (!first) {
-      if (prevIdx !== null && currIdx !== null && currIdx === prevIdx + 1) {
+      if (adjacent) {
         // Originally-adjacent unchanged pair — the author's own gap holds.
-        out += doc.gaps[currIdx]!;
+        out += doc.gaps[currIdx!]!;
       } else {
         const candidate = currIdx !== null ? doc.gaps[currIdx]! : '';
         out += BLANK_LINE.test(candidate) ? candidate : doc.eol + doc.eol;
       }
     }
-    first = false;
     if (piece.kind === 'pristine') {
       const b = doc.blocks[piece.idx]!;
-      out += doc.source.slice(b.span.start, b.span.end);
+      const slice = doc.source.slice(b.span.start, b.span.end);
+      // An INDENTED slice is only safe after its ORIGINAL predecessor: behind
+      // a new neighbour (a list the user just made, a written block) a blank
+      // line does NOT stop CommonMark from capturing it as continuation — an
+      // untouched indented code block would silently become list content on
+      // re-parse. Re-write it through the writer (a fence survives anywhere).
+      if (!first && !adjacent && INDENTED.test(slice)) {
+        const fragment = parseFragment(renderBlockHtml(b, defs));
+        const el = (fragment.childNodes ?? []).find(isElement);
+        out += el ? writeElementMarkdown(el, flavor, doc.eol) : slice;
+        prevIdx = null; // canonicalized — its successor must re-validate too
+        first = false;
+        continue;
+      }
+      out += slice;
       prevIdx = piece.idx;
     } else {
       out += piece.text;
       prevIdx = null;
     }
+    first = false;
   }
 
   const last = pieces[pieces.length - 1]!;

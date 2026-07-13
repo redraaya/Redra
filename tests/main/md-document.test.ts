@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -114,5 +114,52 @@ describe('DocumentManager: Markdown documents', () => {
     expect(saved).not.toContain('- пункт один');
     expect(saved).toContain('# Отчёт');
     expect(saved).toContain('> Цитата, которую не трогаем.');
+  });
+});
+
+describe('MD 2.0 dirty/commit generation protocol', () => {
+  it('liveDirty STAYS true after save when keystrokes outran the written body (dirtyGen > bodyGen)', async () => {
+    const file = path.join(dir, 'note.md');
+    await writeFile(file, SRC);
+    const dm = new DocumentManager(new PerfLog());
+    const { opened } = await dm.open(file);
+    const body = renderDocumentBody(opened.mdState!.mdDoc.blocks);
+    opened.mdState!.liveBody = body.replace('Первый абзац', 'Новый абзац');
+    opened.mdState!.liveDirty = true;
+    opened.mdState!.bodyGen = 3; // the committed body captured gen 3
+    opened.mdState!.dirtyGen = 5; // …but the user kept typing (gen 5 reported)
+    const res = await dm.save();
+    expect(res.ok).toBe(true);
+    expect(opened.mdState!.liveDirty).toBe(true); // gens 4-5 are NOT on disk
+    expect(dm.isDirty()).toBe(true);
+  });
+
+  it('liveDirty clears after save when the written body caught every report', async () => {
+    const file = path.join(dir, 'note.md');
+    await writeFile(file, SRC);
+    const dm = new DocumentManager(new PerfLog());
+    const { opened } = await dm.open(file);
+    const body = renderDocumentBody(opened.mdState!.mdDoc.blocks);
+    opened.mdState!.liveBody = body.replace('Первый абзац', 'Новый абзац');
+    opened.mdState!.liveDirty = true;
+    opened.mdState!.dirtyGen = 5;
+    opened.mdState!.bodyGen = 5;
+    await dm.save();
+    expect(opened.mdState!.liveDirty).toBe(false);
+    expect(dm.isDirty()).toBe(false);
+  });
+
+  it('a commit WITHOUT edits (preview/pdf/telegram) does not make plain ⌘S rewrite the file', async () => {
+    const file = path.join(dir, 'note.md');
+    await writeFile(file, SRC);
+    const before = (await stat(file)).mtimeMs;
+    const dm = new DocumentManager(new PerfLog());
+    const { opened } = await dm.open(file);
+    // Every commit point sends the body unconditionally — zero edits reported.
+    opened.mdState!.liveBody = renderDocumentBody(opened.mdState!.mdDoc.blocks);
+    opened.mdState!.bodyGen = 0;
+    const res = await dm.save();
+    expect(res.ok && 'skipped' in res && res.skipped).toBe(true);
+    expect((await stat(file)).mtimeMs).toBe(before); // no mtime churn, no backup
   });
 });

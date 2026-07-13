@@ -29,8 +29,11 @@ import type { ToolbarAction } from './toolbar.js';
 export interface EditorController {
   /** Arm (editing) / disarm (Preview) the layer. Idempotent. */
   setEditing(editing: boolean): void;
-  /** Commit any active edit session and push its op. For 'edit:commit'. */
-  commitActive(): Promise<void>;
+  /** Commit any active edit session / body. For 'edit:commit'. Resolves TRUE
+   *  when the commit was ACCEPTED by main (md: the body landed; html: always —
+   *  a rejected op already rolled back locally). The ack relays this so a
+   *  dirty md save can fail loudly instead of writing a stale body. */
+  commitActive(): Promise<boolean>;
   /** Cmd+Z routed from the menu. */
   handleUndo(): void;
   /** Cmd+Shift+Z routed from the menu. */
@@ -940,8 +943,8 @@ export function createEditorController(
         disarm();
       }
     },
-    commitActive(): Promise<void> {
-      return endSession(true);
+    commitActive(): Promise<boolean> {
+      return endSession(true).then(() => true);
     },
     handleUndo(): void {
       // ONE timeline — always the journal. While a session is open, first

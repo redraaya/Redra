@@ -108,4 +108,15 @@ describe('Journal: dirty / markSaved', () => {
     j.push(opC); // [opA, opC] — same length as saved [opA, opB], different content
     expect(j.dirty).toBe(true);
   });
+
+  it('markSaved(snapshot) counts only the SERIALIZED ops as saved — an op pushed during the write keeps the journal dirty', () => {
+    const j = new Journal();
+    j.push(opA);
+    const serialized = j.ops; // snapshot taken by save() before writeAtomic
+    j.push(opB); // lands while the file write is in flight
+    j.markSaved(serialized);
+    expect(j.dirty).toBe(true); // opB is NOT in the written bytes
+    j.undo();
+    expect(j.dirty).toBe(false); // back to exactly the saved state
+  });
 });

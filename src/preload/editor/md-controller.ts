@@ -384,8 +384,11 @@ export function createMdEditorController(
     [mainEl, 'input', onInput as EventListener, false],
     [doc, 'selectionchange', onSelectionChange as EventListener, false],
     [doc, 'click', onClick as EventListener, true],
-    [mainEl, 'change', onChange as EventListener, false],
   ];
+  // The checkbox sync lives for the CONTROLLER's lifetime, not the armed
+  // period: Preview makes the inputs inert via CSS, but any toggle that still
+  // lands (keyboard, programmatic) must never desync attribute/class/dirty.
+  mainEl.addEventListener('change', onChange);
 
   function arm(): void {
     mainEl.setAttribute('contenteditable', 'true');
@@ -416,7 +419,7 @@ export function createMdEditorController(
       if (editing) arm();
       else disarm();
     },
-    commitActive(): Promise<void> {
+    commitActive(): Promise<boolean> {
       // Snapshot atomically (no awaits between), then RE-ARM the dirty
       // notifier: any keystroke after this snapshot must announce a fresh
       // generation or it could be lost to the save that is about to run.
@@ -424,14 +427,21 @@ export function createMdEditorController(
       const html = mainEl.innerHTML;
       dirtyAnnounced = false;
       return (bridge.commitMdBody?.(docId, html, snapshotGen) ?? Promise.resolve({ ok: false })).then(
-        () => undefined,
+        (res) => res.ok === true,
+        () => false,
       );
     },
     handleUndo(): void {
+      // Guards: never in Preview, and never mark a pristine doc dirty for a
+      // no-op undo (⌘Z with an empty native stack).
+      if (!editing) return;
+      if (!(doc.queryCommandEnabled?.('undo') ?? false)) return;
       doc.execCommand?.('undo');
       noteInput();
     },
     handleRedo(): void {
+      if (!editing) return;
+      if (!(doc.queryCommandEnabled?.('redo') ?? false)) return;
       doc.execCommand?.('redo');
       noteInput();
     },
@@ -460,6 +470,7 @@ export function createMdEditorController(
       destroyed = true;
       if (editing) disarm();
       editing = false;
+      mainEl.removeEventListener('change', onChange);
       host.remove();
     },
   };

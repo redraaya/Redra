@@ -41,6 +41,14 @@ function textContent(node: P5Node): string {
   if (!isElement(node)) return '';
   return (node.childNodes ?? []).map(textContent).join('');
 }
+/** textContent that keeps LINE BREAKS: a <br> becomes `sep` (pasted code from
+ *  web pages separates lines with <br>; textContent would fuse them). */
+function textContentBr(node: P5Node, sep: string): string {
+  if (isText(node)) return node.value;
+  if (!isElement(node)) return '';
+  if (node.tagName === 'br') return sep;
+  return (node.childNodes ?? []).map((c) => textContentBr(c, sep)).join('');
+}
 
 // --- inline escaping ---------------------------------------------------------
 
@@ -70,6 +78,13 @@ function codeSpan(content: string): string {
   const ticks = '`'.repeat(max + 1);
   const pad = content.startsWith('`') || content.endsWith('`') || content === '' ? ' ' : '';
   return `${ticks}${pad}${content}${pad}${ticks}`;
+}
+
+/** '[t](url "Title")' — the title attr round-trips (render carries it). */
+function linkTitle(node: P5Element): string {
+  const title = attr(node, 'title');
+  if (title === undefined || title === '') return '';
+  return ` "${title.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 function linkDest(url: string): string {
@@ -183,7 +198,7 @@ function writeInlineNode(node: P5Node, ctx: Ctx): string {
         ? ''
         : `<sup>${writeInlineChildren(node, ctx)}</sup>`;
     case 'code':
-      return codeSpan(textContent(node));
+      return codeSpan(textContentBr(node, ' '));
     case 'span':
       if (hasClass(node, 'md-math')) return `$${textContent(node)}$`;
       return writeInlineChildren(node, ctx); // plain span: transparent
@@ -195,13 +210,13 @@ function writeInlineNode(node: P5Node, ctx: Ctx): string {
       const href = isSafeUrl(raw) ? raw : '';
       const inner = writeInlineChildren(node, ctx);
       if (inner === '' && href === '') return '';
-      return `[${inner}](${linkDest(href)})`;
+      return `[${inner}](${linkDest(href)}${linkTitle(node)})`;
     }
     case 'img': {
       const alt = (attr(node, 'alt') ?? '').replace(/([[\]\\])/g, '\\$1');
       const raw = attr(node, 'src') ?? '';
       const src = isSafeUrl(raw) ? raw : '';
-      return `![${alt}](${linkDest(src)})`;
+      return `![${alt}](${linkDest(src)}${linkTitle(node)})`;
     }
     case 'br':
       // Single <br> = hard break; the paragraph writer turns <br><br> into a
@@ -271,6 +286,11 @@ function writeParagraphLines(el: P5Element, ctx: Ctx): string {
   return paragraphs.join(ctx.eol + ctx.eol);
 }
 
+/** Tags that make a bare <div> a BLOCK CONTAINER rather than one paragraph. */
+const BLOCKY_TAGS = new Set([
+  'div', 'p', 'ul', 'ol', 'pre', 'blockquote', 'table', 'hr', 'details',
+]);
+
 /** Block children a list item can hold — routed through writeBlockElement so
  *  they survive (a code fence / table inside an <li> must not flatten to text). */
 const LIST_BLOCK_TAGS = new Set([
@@ -279,8 +299,11 @@ const LIST_BLOCK_TAGS = new Set([
 
 function writeListItems(list: P5Element, ctx: Ctx, indent: string): string[] {
   const ordered = list.tagName === 'ol';
+  // The live body is untrusted: only a plain 1-6 digit start survives (the
+  // render/sanitize side pins the same shape) — 9e99/-5 would write invalid
+  // list markers.
   const startAttr = attr(list, 'start');
-  let n = startAttr ? Number(startAttr) : 1;
+  let n = startAttr && /^\d{1,6}$/.test(startAttr) ? Number(startAttr) : 1;
   const lines: string[] = [];
   for (const child of list.childNodes ?? []) {
     if (!isElement(child) || child.tagName !== 'li') continue;
@@ -359,7 +382,7 @@ function writeFence(el: P5Element, ctx: Ctx): string {
   const codeEl = (el.childNodes ?? []).find((c) => isElement(c) && c.tagName === 'code') as
     | P5Element
     | undefined;
-  const content = textContent(codeEl ?? el).replace(/\n$/, '');
+  const content = textContentBr(codeEl ?? el, '\n').replace(/\n$/, '');
   const langClass = codeEl ? (attr(codeEl, 'class') ?? '') : '';
   const lang = /language-([a-zA-Z0-9#+_.-]{1,32})/.exec(langClass)?.[1] ?? '';
   const base = ctx.flavor.fence;
@@ -450,10 +473,15 @@ function writeBlockElement(el: P5Element, ctx: Ctx): string {
         return (el.childNodes ?? []).map(islandHtml).join('');
       }
       if (tag === 'div') {
-        // A BARE div is Chromium editing chrome (whole-document contenteditable
-        // splits/pastes can mint them), never our render vocabulary — write it
-        // as a paragraph so inline formatting survives and raw HTML never
-        // enters the file through this path.
+        // A BARE div is editing/paste chrome (Chromium splits, VS Code and web
+        // clipboards wrap blocks in divs), never our render vocabulary. With
+        // BLOCK children each child writes as its own block (a pasted
+        // <div><p>a</p><p>b</p></div> must not fuse to "ab"); a pure inline
+        // run writes as one paragraph. Raw HTML never enters the file here.
+        const hasBlockChild = (el.childNodes ?? []).some(
+          (c) => isElement(c) && (BLOCKY_TAGS.has(c.tagName) || /^h[1-6]$/.test(c.tagName)),
+        );
+        if (hasBlockChild) return writeBlocks(el.childNodes ?? [], ctx);
         return writeParagraphLines(el, ctx);
       }
       // Islands rooted directly (details) : HTML verbatim minus stamps.

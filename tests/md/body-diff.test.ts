@@ -234,3 +234,35 @@ describe('roundtripOuter', () => {
     }
   });
 });
+
+describe('body-diff: review round 2', () => {
+  it('toggling a <details> disclosure (view state) keeps the island pristine byte-for-byte', () => {
+    const src = '<details id="keep" class="note"><summary>t</summary>скрытое</details>\n';
+    const doc = parseMarkdownDoc(src);
+    const body = renderDocumentBody(doc.blocks);
+    // Chromium reflects the open PROPERTY into the attribute on click.
+    const toggled = body.replace('<details', '<details open=""');
+    const out = serializeMdFromBody(doc, toggled, sniffFlavor(doc));
+    expect(out).toBe(src); // id/class/original formatting untouched
+  });
+
+  it('an untouched INDENTED code block behind a broken adjacency is fenced, not swallowed', () => {
+    const src = '- item\n\npara\n\n    code line\n';
+    const doc = parseMarkdownDoc(src);
+    const body = renderDocumentBody(doc.blocks);
+    const out = serializeMdFromBody(doc, body.replace(/<p[^>]*>para<\/p>/, ''), sniffFlavor(doc));
+    const re = parseMarkdownDoc(out);
+    // The list must NOT absorb the code block on re-parse.
+    expect(re.blocks.length).toBe(2);
+    const types = re.blocks.map((b) => (b.node as { type?: string }).type);
+    expect(types).toContain('list');
+    expect(types).toContain('code');
+    expect(out).toContain('code line');
+  });
+
+  it('editing a paragraph with a titled link keeps the title', () => {
+    const src = 'see [docs](https://e.com "The manual") here\n';
+    const out = save(src, (b) => b.replace('here', 'there'));
+    expect(out).toContain('[docs](https://e.com "The manual")');
+  });
+});

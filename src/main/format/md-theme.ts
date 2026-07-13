@@ -103,6 +103,9 @@ img{max-width:100%;height:auto;border-radius:8px;margin:6px 0 22px}
 [data-redra-readonly]{position:relative}
 /* MD 2.0 whole-document editing: the caret is the only editing chrome. */
 main[contenteditable=true]{outline:none;caret-color:#d9482b}
+/* Preview is read-only: checkboxes go inert (a toggle there would flip the
+   VIEW while the change listener is disarmed — screen and file diverging). */
+main:not([contenteditable=true]) li.md-task > input[type=checkbox]{pointer-events:none;cursor:default}
 @media (prefers-color-scheme: dark){
   :root:not([data-theme=light]) main[contenteditable=true]{caret-color:#ff6b4a}
 }

@@ -344,10 +344,14 @@ export class DocumentManager {
     // originalBytes — skip the write. HTML: no ops AND a clean journal (a
     // dirty journal with no ops = edit → save → undo-all means disk holds the
     // EDITED bytes, so we must fall through and write originalBytes back).
-    // MD 2.0: no committed live body and no dirty flag (edits never enter the
-    // journal — keying this on ops would silently skip every md save). A
-    // restored backup always writes: disk holds the PRE-restore bytes.
-    const mdTouched = cur.format === 'md' && !!(cur.mdState?.liveBody !== null || cur.mdState?.liveDirty);
+    // MD 2.0: dirty now, or edits were EVER reported this session (dirtyGen>0
+    // covers edit → undo-all: disk may hold older bytes). A body commit alone
+    // is NOT an edit — every preview/pdf/telegram commit sends one, and
+    // treating it as touched would make a plain ⌘S on a pristine doc churn
+    // mtime and mint a spurious Version History backup. A restored backup
+    // always writes: disk holds the PRE-restore bytes.
+    const mdTouched =
+      cur.format === 'md' && !!(cur.mdState?.liveDirty || (cur.mdState?.dirtyGen ?? 0) > 0);
     const htmlTouched = ops.length > 0 || cur.journal.dirty;
     if (
       asPath === undefined &&
@@ -389,6 +393,11 @@ export class DocumentManager {
       // Same for BOM files: the BOM (which won at decode, possibly over a
       // lying meta) is not re-emitted, so the meta must tell the truth.
       let bytes: Buffer;
+      // Generation of the body being WRITTEN — captured before any await. A
+      // commit landing while writeAtomic is in flight bumps mdState.bodyGen,
+      // and clearing liveDirty against the post-write value would mark edits
+      // as saved that are not in the written bytes.
+      const servedBodyGen = cur.mdState?.bodyGen ?? 0;
       if (cur.format === 'md' && cur.mdState) {
         // Markdown 2.0: the body-diff serializer over the committed live body
         // (source verbatim when nothing was ever committed). utf-8; no
@@ -415,13 +424,17 @@ export class DocumentManager {
         cur.backupDone = true; // we just wrote this file ourselves; no original to back up
       }
       cur.isUntitled = false; // written to disk now — a real file from here on
-      cur.journal.markSaved();
+      // Mark exactly the SERIALIZED ops as saved: an op pushed during the
+      // awaited write is not in the bytes and must keep the journal dirty.
+      cur.journal.markSaved(ops);
       if (cur.mdState) {
         // Keystrokes typed WHILE this save was writing reported a newer
-        // generation than the committed body — they are not in the written
+        // generation than the WRITTEN body — they are not in the written
         // bytes, so the doc must stay dirty (the re-arm race from the design
-        // review). Only a body that caught up with every report clears it.
-        cur.mdState.liveDirty = cur.mdState.dirtyGen > cur.mdState.bodyGen;
+        // review). Compare against the pre-write snapshot: a commit that
+        // landed during writeAtomic bumped mdState.bodyGen but its content is
+        // NOT on disk.
+        cur.mdState.liveDirty = cur.mdState.dirtyGen > servedBodyGen;
       }
       cur.restoredFromBackup = false; // the restored state is on disk now
       this.perf.record('save', performance.now() - t0, { bytes: bytes.length });
