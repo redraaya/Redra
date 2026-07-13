@@ -160,6 +160,7 @@ const STRINGS = {
   'toolbar.code': { ru: 'Код', en: 'Code' },
   'toolbar.link': { ru: 'Ссылка', en: 'Link' },
   'panel.more': { ru: 'Ещё форматирование', en: 'More formatting' },
+  'panel.moreShort': { ru: 'Ещё ⌄', en: 'More ⌄' },
   'panel.turnInto': { ru: 'Превратить блок', en: 'Turn into' },
   'panel.moreFormat': { ru: 'Ещё форматирование', en: 'More formatting' },
   'panel.h1': { ru: 'Заголовок 1', en: 'Heading 1' },

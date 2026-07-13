@@ -296,7 +296,7 @@ const TOOL_BUTTONS: readonly ToolButtonDef[] = [
   { id: 'blockquote', cls: 'bq', titleKey: 'panel.quote', glyph: { text: '❝' }, formats: MD_ONLY, active: (s) => s.blockTag === 'blockquote', sepBefore: true, row: 2 },
   { id: 'pre', cls: 'bk c', titleKey: 'panel.code', glyph: { text: '{ }' }, formats: MD_ONLY, active: (s) => s.blockTag === 'pre', row: 2 },
   { id: 'hr', cls: 'bk', titleKey: 'panel.divider', glyph: { text: '—' }, formats: MD_ONLY, active: () => false, row: 2 },
-  { id: 'more', cls: 'more', titleKey: 'panel.more', glyph: { text: 'Ещё ⌄' }, formats: MD_ONLY, active: () => false, sepBefore: true, row: 2 },
+  { id: 'more', cls: 'more', titleKey: 'panel.more', glyph: {}, formats: MD_ONLY, active: () => false, sepBefore: true, row: 2 },
 ];
 
 export class SelectionToolbar {
@@ -343,7 +343,12 @@ export class SelectionToolbar {
     };
 
     this.buttons = TOOL_BUTTONS.filter((def) => def.formats.has(format)).map((def) => ({
-      el: makeButton(def.cls, def.shortcut ? `${t(def.titleKey)} ${def.shortcut}` : t(def.titleKey), def.glyph, () => {
+      el: makeButton(
+        def.cls,
+        def.shortcut ? `${t(def.titleKey)} ${def.shortcut}` : t(def.titleKey),
+        // The "More" opener is the one TEXT glyph — localized, never hardcoded.
+        def.id === 'more' ? { text: t('panel.moreShort') } : def.glyph,
+        () => {
         if (def.id === 'link') this.enterLinkMode();
         else if (def.id === 'more') this.togglePanel();
         else if (BLOCK_KIND_IDS.has(def.id)) this.onBlockType(def.id as BlockKind);

@@ -10,7 +10,7 @@ blocks by their handle, delete what you don't need, hit ⌘S — and the **same
 file** is saved back to disk, its layout (or its Markdown) intact. No code, no
 split-screen preview, no broken formatting. Or export it to PDF.
 
-![A document in Redra](docs/assets/redra-doc.png)
+![Markdown in Redra — the two-row toolbar over a live document](docs/assets/redra-md.png)
 
 ![Redra features](docs/assets/features.png)
 
@@ -37,6 +37,8 @@ split-screen preview, no broken formatting. Or export it to PDF.
 - **It matches your file's style.** Redra sniffs how an opened file already
   writes bold, lists, headings and the like, and keeps new edits in that same
   dialect — a new file uses clean, GitHub-compatible defaults.
+
+![The slash menu — type "/" on an empty line and pick a block](docs/assets/redra-slash.png)
 
 **New in v0.4.1:**
 
@@ -90,6 +92,8 @@ you opened.
 
 That's the whole trick — and it means your embedded styles, scripts, charts
 and fonts survive every edit.
+
+![An HTML document in Redra — block handle, hover highlight](docs/assets/redra-doc.png)
 
 <details>
 <summary>For the technically curious</summary>

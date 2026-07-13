@@ -63,6 +63,9 @@ const SMOKE = cliArgs.includes('--smoke');
 const cliFile = cliArgs.find((a) => !a.startsWith('-') && OPENABLE_RE.test(a));
 const shotIdx = cliArgs.indexOf('--screenshot');
 const shotPath = shotIdx >= 0 ? (cliArgs[shotIdx + 1] ?? null) : null;
+const shotFindIdx = cliArgs.indexOf('--screenshot-find');
+const shotFind = shotFindIdx >= 0 ? (cliArgs[shotFindIdx + 1] ?? null) : null;
+const shotSlash = cliArgs.includes('--screenshot-slash');
 // Hidden startup: open a fresh untitled Markdown doc (⌘N) — for the new-file
 // README screenshot and manual QA of the empty-heading state.
 const START_NEW_FILE = cliArgs.includes('--new-file');
@@ -89,7 +92,7 @@ const smoke = new SmokeHarness(
   // Smoke runs drive a single window — the first (only) context's document.
   () => registry.all()[0]?.docManager.currentDoc ?? null,
 );
-const shot = new ScreenshotHarness(shotPath);
+const shot = new ScreenshotHarness(shotPath, shotFind, shotSlash);
 let recents: RecentsStore;
 let settingsStore: SettingsStore;
 /** In-memory session shared by all shell windows and doc views (no disk state, no keychain). */

@@ -12,7 +12,13 @@ import type { BrowserWindow, WebContentsView } from 'electron';
  * handle synthesized over the document); without one — the start screen.
  */
 export class ScreenshotHarness {
-  constructor(private readonly outPath: string | null) {
+  constructor(
+    private readonly outPath: string | null,
+    /** Select this text in the doc before capturing (shows the toolbar). */
+    private readonly findText: string | null = null,
+    /** Open the slash menu in a fresh empty paragraph before capturing. */
+    private readonly slash: boolean = false,
+  ) {
     if (this.outPath !== null) {
       // Light theme regardless of system setting, and a throwaway userData —
       // the user's real recents must never leak into a published screenshot.
@@ -65,6 +71,30 @@ export class ScreenshotHarness {
         x: Math.round(width / 2),
         y: 140,
       });
+      if (this.findText !== null) {
+        // Select the first match — the preload's selection toolbar pops over
+        // it exactly as it would for a user drag (selectionchange is shared).
+        await docView.webContents.executeJavaScript(
+          `window.find(${JSON.stringify(this.findText)}); void 0;`,
+        );
+      }
+      if (this.slash) {
+        // A fresh empty paragraph + a "/" keydown: the md controller's slash
+        // menu opens the same way it does for a real keystroke.
+        await docView.webContents.executeJavaScript(`(() => {
+          const main = document.querySelector('main');
+          const p = document.createElement('p');
+          p.appendChild(document.createElement('br'));
+          main.appendChild(p);
+          const r = document.createRange();
+          r.selectNodeContents(p);
+          r.collapse(true);
+          const sel = getSelection();
+          sel.removeAllRanges();
+          sel.addRange(r);
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true }));
+        })(); void 0;`);
+      }
       await new Promise((r) => setTimeout(r, 400));
       // The doc view is a separate WebContentsView: the shell capture shows
       // only the strip above it — composite the two captures by rows (BGRA).
