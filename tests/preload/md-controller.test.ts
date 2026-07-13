@@ -162,4 +162,42 @@ describe('md-controller: whole-document editing', () => {
     const ok = await controller.commitActive();
     expect(ok).toBe(false);
   });
+
+  it('slash menu: "/" in an EMPTY block opens the picker; Enter applies without inserting "/"', () => {
+    // Give the doc an empty paragraph and put the caret inside.
+    const empty = document.createElement('p');
+    empty.id = 'empty';
+    main.appendChild(empty);
+    const sel = window.getSelection()!;
+    const r = document.createRange();
+    r.selectNodeContents(empty);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+
+    const slashDown = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true });
+    document.dispatchEvent(slashDown);
+    expect(slashDown.defaultPrevented).toBe(true); // consumed — the menu is open
+
+    // Filter to the task item and apply: the pick runs applyBlockType, whose
+    // task branch mutates the DOM even in jsdom when the caret sits in a list…
+    // here we just assert the keys are consumed and an edit was registered.
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    document.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true); // consumed by the menu
+    expect(bridge.mdDirty).toHaveBeenCalled(); // the pick counted as an edit
+  });
+
+  it('slash menu: "/" mid-text stays a plain keystroke', () => {
+    const p = document.getElementById('p1')!; // has text
+    const sel = window.getSelection()!;
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    r.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    const slashDown = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true });
+    document.dispatchEvent(slashDown);
+    expect(slashDown.defaultPrevented).toBe(false); // not consumed — just type it
+  });
 });

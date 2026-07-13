@@ -77,12 +77,12 @@ ul,ol{margin:0 0 16px;padding-left:26px}
 li{margin-bottom:7px}
 li::marker{color:var(--d-muted)}
 li.md-task{list-style:none;margin-left:-22px}
-li.md-task > input[type=checkbox]{
+li.md-task input[type=checkbox]{
   appearance:none;-webkit-appearance:none;width:15px;height:15px;margin:0 9px 0 0;
   border:1.5px solid var(--d-quote);border-radius:5px;vertical-align:-2.5px;
   background:var(--d-paper);cursor:pointer;
 }
-li.md-task > input[type=checkbox]:checked{
+li.md-task input[type=checkbox]:checked{
   background:var(--d-link);border-color:var(--d-link);
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-size:12px;background-position:center;background-repeat:no-repeat;
@@ -105,7 +105,7 @@ img{max-width:100%;height:auto;border-radius:8px;margin:6px 0 22px}
 main[contenteditable=true]{outline:none;caret-color:#d9482b}
 /* Preview is read-only: checkboxes go inert (a toggle there would flip the
    VIEW while the change listener is disarmed — screen and file diverging). */
-main:not([contenteditable=true]) li.md-task > input[type=checkbox]{pointer-events:none;cursor:default}
+main:not([contenteditable=true]) li.md-task input[type=checkbox]{pointer-events:none;cursor:default}
 @media (prefers-color-scheme: dark){
   :root:not([data-theme=light]) main[contenteditable=true]{caret-color:#ff6b4a}
 }

@@ -312,9 +312,17 @@ function writeListItems(list: P5Element, ctx: Ctx, indent: string): string[] {
     // Task state: the REAL checkbox input is the source of truth (the live
     // toggle syncs its `checked` attribute); li classes remain the fallback
     // for content that lost the input (e.g. a paste kept only the classes).
-    const box = (child.childNodes ?? []).find(
-      (c) => isElement(c) && c.tagName === 'input' && attr(c, 'type') === 'checkbox',
-    );
+    const findBox = (n: P5Node): P5Element | null => {
+      if (!isElement(n)) return null;
+      if (n.tagName === 'input' && attr(n, 'type') === 'checkbox') return n;
+      if (n.tagName === 'ul' || n.tagName === 'ol') return null; // not a nested item's box
+      for (const c of n.childNodes ?? []) {
+        const hit = findBox(c);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const box = (child.childNodes ?? []).map(findBox).find((b) => b !== null) ?? undefined;
     const task = box
       ? attr(box as P5Element, 'checked') !== undefined
         ? '[x] '

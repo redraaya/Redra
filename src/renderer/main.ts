@@ -171,6 +171,9 @@ function syncFindBar(): void {
   findBar.hidden = !findModel.open;
   findCount.textContent = findModel.counter;
   btnFind.classList.toggle('active', findModel.open);
+  // The bar and the centered document title share the strip — hide the title
+  // while searching instead of typing into a soup of overlapping text.
+  $('doc-title').style.visibility = findModel.open ? 'hidden' : '';
 }
 
 function openFindBar(): void {

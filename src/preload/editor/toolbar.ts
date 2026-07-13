@@ -236,6 +236,8 @@ interface ToolButtonDef {
   sepBefore?: boolean;
   /** md two-row layout: 2 = the block-type row (default 1 = inline row). */
   row?: 1 | 2;
+  /** Keyboard shortcut, appended to the tooltip ("Жирный ⌘B"). */
+  shortcut?: string;
 }
 
 /** Button ids that dispatch through onBlockType (they ARE BlockKind values). */
@@ -277,12 +279,12 @@ const MD_ONLY: ReadonlySet<DocFormat> = new Set<DocFormat>(['md']);
  * panel (block types + rich extras) is added separately.
  */
 const TOOL_BUTTONS: readonly ToolButtonDef[] = [
-  { id: 'bold', cls: 'b', titleKey: 'toolbar.bold', glyph: { text: 'B' }, formats: BOTH, active: (s) => s.bold },
-  { id: 'italic', cls: 'i', titleKey: 'toolbar.italic', glyph: { text: 'I' }, formats: BOTH, active: (s) => s.italic },
-  { id: 'underline', cls: 'u', titleKey: 'toolbar.underline', glyph: { text: 'U' }, formats: MD_ONLY, active: (s) => !!s.underline },
-  { id: 'strike', cls: 's', titleKey: 'toolbar.strikethrough', glyph: { text: 'S' }, formats: MD_ONLY, active: (s) => !!s.strike },
-  { id: 'spoiler', cls: 'sp', titleKey: 'toolbar.spoiler', glyph: { text: 'аб' }, formats: MD_ONLY, active: (s) => !!s.spoiler },
-  { id: 'code', cls: 'c', titleKey: 'toolbar.code', glyph: { text: '<>' }, formats: BOTH, active: (s) => s.code, sepBefore: true },
+  { id: 'bold', cls: 'b', titleKey: 'toolbar.bold', glyph: { text: 'B' }, formats: BOTH, active: (s) => s.bold, shortcut: '⌘B' },
+  { id: 'italic', cls: 'i', titleKey: 'toolbar.italic', glyph: { text: 'I' }, formats: BOTH, active: (s) => s.italic, shortcut: '⌘I' },
+  { id: 'underline', cls: 'u', titleKey: 'toolbar.underline', glyph: { text: 'U' }, formats: MD_ONLY, active: (s) => !!s.underline, shortcut: '⌘U' },
+  { id: 'strike', cls: 's', titleKey: 'toolbar.strikethrough', glyph: { text: 'S' }, formats: MD_ONLY, active: (s) => !!s.strike, shortcut: '⇧⌘X' },
+  { id: 'spoiler', cls: 'sp', titleKey: 'toolbar.spoiler', glyph: { text: 'аб' }, formats: MD_ONLY, active: (s) => !!s.spoiler, shortcut: '⇧⌘P' },
+  { id: 'code', cls: 'c', titleKey: 'toolbar.code', glyph: { text: '<>' }, formats: BOTH, active: (s) => s.code, sepBefore: true, shortcut: '⇧⌘M' },
   { id: 'link', cls: 'l', titleKey: 'toolbar.link', glyph: { html: LINK_SVG }, formats: BOTH, active: (s) => s.link !== null },
   // --- md row 2: block types, available IMMEDIATELY (no panel dive) ---------
   { id: 'h1', cls: 'bk', titleKey: 'panel.h1', glyph: { text: 'H1' }, formats: MD_ONLY, active: (s) => s.blockTag === 'h1', row: 2 },
@@ -341,7 +343,7 @@ export class SelectionToolbar {
     };
 
     this.buttons = TOOL_BUTTONS.filter((def) => def.formats.has(format)).map((def) => ({
-      el: makeButton(def.cls, t(def.titleKey), def.glyph, () => {
+      el: makeButton(def.cls, def.shortcut ? `${t(def.titleKey)} ${def.shortcut}` : t(def.titleKey), def.glyph, () => {
         if (def.id === 'link') this.enterLinkMode();
         else if (def.id === 'more') this.togglePanel();
         else if (BLOCK_KIND_IDS.has(def.id)) this.onBlockType(def.id as BlockKind);

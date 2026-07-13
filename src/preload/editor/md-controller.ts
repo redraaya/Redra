@@ -27,6 +27,7 @@ import type { BlockKind } from '../../shared/doc-types.js';
 import type { EditorController } from './controller.js';
 import { SelectionToolbar, selectionContext, TOOLBAR_CSS } from './toolbar.js';
 import type { ToolbarAction } from './toolbar.js';
+import { SlashMenu, SLASH_CSS } from './slash-menu.js';
 import { computeInlineToggle, toggleInlineTag } from './format.js';
 
 /** Minimal chrome CSS: the titlebar tooltip (same look as the HTML overlay). */
@@ -105,7 +106,7 @@ export function createMdEditorController(
   }
   const shadow = host.attachShadow({ mode: 'closed' });
   const style = doc.createElement('style');
-  style.textContent = MD_CHROME_CSS + TOOLBAR_CSS;
+  style.textContent = MD_CHROME_CSS + TOOLBAR_CSS + SLASH_CSS;
   shadow.appendChild(style);
   const tip = doc.createElement('div');
   tip.className = 'tb-tip';
@@ -113,6 +114,8 @@ export function createMdEditorController(
   doc.documentElement.appendChild(host);
 
   const t = makeT(pickLang(navigator.language));
+  // "/" in an empty block → pick what the next text becomes (Notion pattern).
+  const slash = new SlashMenu(doc, shadow, t, (kind) => applyBlockType(kind));
   const toolbar = new SelectionToolbar(
     doc,
     shadow,
@@ -127,6 +130,9 @@ export function createMdEditorController(
   let toolbarQueued = false;
 
   function updateToolbar(): void {
+    // The URL input legitimately steals focus/selection — a selectionchange
+    // must not tear the link editor down mid-typing.
+    if (toolbar.linkMode) return;
     const ctx = selectionContext(win, doc, mainEl);
     if (!ctx) {
       toolbar.hide();
@@ -285,14 +291,16 @@ export function createMdEditorController(
                 ? [li]
                 : [];
           for (const item of items.length ? items : li ? [li] : []) {
+            // Native list surgery (Enter splits, re-listing) can leave a
+            // checkbox at ANY depth or duplicate it — normalize hard: strip
+            // every input in the item, then re-add exactly one when marking.
+            const boxes = Array.from(item.querySelectorAll('input[type="checkbox"]'));
+            for (const b of boxes) b.remove();
             if (item.classList.contains('md-task')) {
               item.classList.remove('md-task', 'md-task-done');
-              item.querySelector(':scope > input[type="checkbox"]')?.remove();
             } else {
               item.classList.add('md-task');
-              if (!item.querySelector(':scope > input[type="checkbox"]')) {
-                item.insertAdjacentHTML('afterbegin', CHECKBOX_HTML);
-              }
+              item.insertAdjacentHTML('afterbegin', CHECKBOX_HTML);
             }
           }
         }
@@ -335,21 +343,67 @@ export function createMdEditorController(
         return;
       }
     }
-    // Click on the empty run-out below the last block: give the caret a home —
-    // append a fresh paragraph (this is what "дописать в конец" clicks mean
-    // when the last block is a list/code fence that swallows the caret).
+    // Click on <main> itself (its padding / the run-out below the last
+    // block). Left alone, Chromium collapses the caret BETWEEN child blocks
+    // of the container and renders it as tall as the whole content — the
+    // red "orange stripe". Route every such click to a real text position:
+    //   • beside a block (same Y band) → caret at its start/end;
+    //   • between blocks → caret at the start of the next block;
+    //   • below the last block → a fresh paragraph (the "дописать" click).
     if (editing && target === mainEl) {
-      const last = mainEl.lastElementChild;
-      if (!last || e.clientY > last.getBoundingClientRect().bottom) {
-        if (last && last.tagName === 'P' && (last.textContent ?? '').trim() === '') {
-          placeCaretIn(last);
-          return;
+      e.preventDefault();
+      const blocks = Array.from(mainEl.children) as HTMLElement[];
+      const last = blocks[blocks.length - 1] ?? null;
+      if (last && e.clientY <= last.getBoundingClientRect().bottom) {
+        for (const block of blocks) {
+          const r = block.getBoundingClientRect();
+          if (e.clientY <= r.bottom) {
+            placeCaret(block, e.clientX > r.right);
+            return;
+          }
         }
-        const p = doc.createElement('p');
-        p.appendChild(doc.createElement('br'));
-        mainEl.appendChild(p);
-        placeCaretIn(p);
-        noteInput();
+        return;
+      }
+      if (last && last.tagName === 'P' && (last.textContent ?? '').trim() === '') {
+        placeCaretIn(last);
+        return;
+      }
+      const p = doc.createElement('p');
+      p.appendChild(doc.createElement('br'));
+      mainEl.appendChild(p);
+      placeCaretIn(p);
+      noteInput();
+    }
+  }
+
+  /** The block-level child of <main> the caret currently sits in, if any. */
+  function caretBlock(): HTMLElement | null {
+    const sel = win.getSelection?.();
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
+    const node = sel.anchorNode;
+    if (!node || !mainEl.contains(node)) return null;
+    let el: Element | null = node.nodeType === 1 ? (node as Element) : node.parentElement;
+    while (el && el.parentElement !== mainEl) el = el.parentElement;
+    return el instanceof HTMLElement ? el : null;
+  }
+
+  function onKeyDown(e: KeyboardEvent): void {
+    if (!editing) return;
+    if (slash.visible) {
+      if (slash.handleKey(e)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+      return;
+    }
+    if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // Only in an EMPTY block: mid-text a slash is just a slash (paths,
+      // fractions), and the empty-block case is exactly "what comes next?".
+      const block = caretBlock();
+      if (block && (block.textContent ?? '').trim() === '') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        slash.open(block.getBoundingClientRect());
       }
     }
   }
@@ -364,17 +418,29 @@ export function createMdEditorController(
       if (target.checked) target.setAttribute('checked', '');
       else target.removeAttribute('checked');
       const li = target.closest('li');
-      if (li) li.classList.toggle('md-task-done', target.checked);
+      if (li) {
+        li.classList.toggle('md-task-done', target.checked);
+        // Editing surgery sometimes duplicates the box — the clicked one wins.
+        for (const other of Array.from(li.querySelectorAll('input[type="checkbox"]'))) {
+          if (other !== target) other.remove();
+        }
+      }
       noteInput();
     }
   }
 
   function placeCaretIn(el: Element): void {
+    placeCaret(el, false);
+  }
+
+  /** Collapse the caret to the start (or end) of `el`'s CONTENTS — never onto
+   *  a <main>-level boundary, where Chromium paints a content-tall caret. */
+  function placeCaret(el: Element, atEnd: boolean): void {
     const sel = win.getSelection?.();
     if (!sel) return;
     const range = doc.createRange();
     range.selectNodeContents(el);
-    range.collapse(true);
+    range.collapse(!atEnd);
     sel.removeAllRanges();
     sel.addRange(range);
     mainEl.focus({ preventScroll: true });
@@ -384,6 +450,7 @@ export function createMdEditorController(
     [mainEl, 'input', onInput as EventListener, false],
     [doc, 'selectionchange', onSelectionChange as EventListener, false],
     [doc, 'click', onClick as EventListener, true],
+    [doc, 'keydown', onKeyDown as EventListener, true],
   ];
   // The checkbox sync lives for the CONTROLLER's lifetime, not the armed
   // period: Preview makes the inputs inert via CSS, but any toggle that still
@@ -408,6 +475,7 @@ export function createMdEditorController(
   function disarm(): void {
     for (const [target, type, fn, opts] of listeners) target.removeEventListener(type, fn, opts);
     toolbar.hide();
+    slash.close();
     mainEl.removeAttribute('contenteditable');
     mainEl.removeAttribute('spellcheck');
   }

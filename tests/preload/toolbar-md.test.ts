@@ -34,7 +34,7 @@ describe('quick toolbar: per-format button sets', () => {
   it('HTML mode renders exactly bold, italic, code, link', () => {
     const { toolbar } = makeToolbar('html');
     toolbar.show(RECT, { bold: false, italic: false, code: false, link: null });
-    const titles = Array.from(toolbar.element.querySelectorAll('button')).map((b) => b.getAttribute('title'));
+    const titles = Array.from(toolbar.element.querySelectorAll('button')).map((b) => (b.getAttribute('title') ?? '').replace(/ [⌘⇧].*$/u, ''));
     expect(titles).toEqual([t('toolbar.bold'), t('toolbar.italic'), t('toolbar.code'), t('toolbar.link')]);
   });
 
@@ -45,7 +45,7 @@ describe('quick toolbar: per-format button sets', () => {
     const rows = toolbar.element.querySelectorAll('.frow');
     expect(rows.length).toBe(2);
     const titlesOf = (row: Element): (string | null)[] =>
-      Array.from(row.querySelectorAll('button')).map((b) => b.getAttribute('title'));
+      Array.from(row.querySelectorAll('button')).map((b) => (b.getAttribute('title') ?? '').replace(/ [⌘⇧].*$/u, ''));
     expect(titlesOf(rows[0]!)).toEqual([
       t('toolbar.bold'),
       t('toolbar.italic'),
@@ -73,7 +73,7 @@ describe('quick toolbar: per-format button sets', () => {
     const { toolbar, onBlockType } = makeToolbar('md');
     toolbar.show(RECT, MD_STATE);
     const byTitle = (title: string): HTMLButtonElement =>
-      Array.from(toolbar.element.querySelectorAll('button')).find((b) => b.getAttribute('title') === title)!;
+      Array.from(toolbar.element.querySelectorAll('button')).find((b) => (b.getAttribute('title') ?? '').startsWith(title))!;
     byTitle(t('panel.h1')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     byTitle(t('panel.numbered')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     byTitle(t('panel.task')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -83,7 +83,7 @@ describe('quick toolbar: per-format button sets', () => {
   it('row-2 active states follow the caret block (blockTag/listKind)', () => {
     const { toolbar } = makeToolbar('md');
     toolbar.show(RECT, { ...MD_STATE, blockTag: 'h2', listKind: 'task' });
-    const active = Array.from(toolbar.element.querySelectorAll('button.active')).map((b) => b.getAttribute('title'));
+    const active = Array.from(toolbar.element.querySelectorAll('button.active')).map((b) => (b.getAttribute('title') ?? '').replace(/ [⌘⇧].*$/u, ''));
     expect(active).toContain(t('panel.h2'));
     expect(active).toContain(t('panel.task'));
     expect(active).not.toContain(t('panel.h1'));
@@ -93,7 +93,7 @@ describe('quick toolbar: per-format button sets', () => {
     const { toolbar, onAction } = makeToolbar('md');
     toolbar.show(RECT, MD_STATE);
     const byTitle = (title: string): HTMLButtonElement =>
-      Array.from(toolbar.element.querySelectorAll('button')).find((b) => b.getAttribute('title') === title)!;
+      Array.from(toolbar.element.querySelectorAll('button')).find((b) => (b.getAttribute('title') ?? '').startsWith(title))!;
     byTitle(t('toolbar.underline')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     byTitle(t('toolbar.strikethrough')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     byTitle(t('toolbar.spoiler')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -103,7 +103,7 @@ describe('quick toolbar: per-format button sets', () => {
   it('active states reflect underline/strike/spoiler', () => {
     const { toolbar } = makeToolbar('md');
     toolbar.show(RECT, { ...MD_STATE, underline: true, spoiler: true });
-    const active = Array.from(toolbar.element.querySelectorAll('button.active')).map((b) => b.getAttribute('title'));
+    const active = Array.from(toolbar.element.querySelectorAll('button.active')).map((b) => (b.getAttribute('title') ?? '').replace(/ [⌘⇧].*$/u, ''));
     expect(active).toContain(t('toolbar.underline'));
     expect(active).toContain(t('toolbar.spoiler'));
     expect(active).not.toContain(t('toolbar.strikethrough'));
