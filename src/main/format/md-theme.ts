@@ -45,6 +45,10 @@ h2{font-size:23px;font-weight:650;letter-spacing:-.018em;margin:34px 0 12px}
 h3{font-size:18px;font-weight:600;letter-spacing:-.01em;margin:26px 0 8px}
 h4{font-size:15.5px;font-weight:600;margin:22px 0 6px}
 h5,h6{font-size:14px;font-weight:600;color:var(--d-muted);margin:20px 0 6px}
+/* New-file placeholder: an empty block that carries data-redra-ph shows a muted
+   hint until the first keystroke, so the caret has a visible, clickable home.
+   pointer-events:none keeps clicks landing on the block for caret placement. */
+[data-redra-ph]:empty::before{content:attr(data-redra-ph);color:var(--d-muted);pointer-events:none}
 p{margin:0 0 16px}
 a{color:var(--d-link);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2.5px}
 hr{border:none;border-top:1px solid var(--d-line);margin:30px 0}

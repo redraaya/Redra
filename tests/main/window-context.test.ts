@@ -1,11 +1,15 @@
+import type { BrowserWindow } from 'electron';
 import { describe, expect, it } from 'vitest';
 import {
   ContextRegistry,
+  WindowContext,
   chooseOpenTarget,
   isFreeForOpen,
   pathsEqual,
 } from '../../src/main/window-context.js';
 import type { ContextLike } from '../../src/main/window-context.js';
+import { DocumentManager } from '../../src/main/document-manager.js';
+import { PerfLog } from '../../src/main/lib/perf.js';
 
 /** Minimal fake context — the registry only sees the structural interface. */
 function fake(over: Partial<ContextLike> & { shellWcId: number }): ContextLike {
@@ -85,6 +89,18 @@ describe('ContextRegistry', () => {
 
     it('different file → null', () => {
       expect(reg.byDocPath('/docs/Other.html', 'darwin')).toBeNull();
+    });
+
+    it('an untitled document exposes no docPath, so it is never "already open"', () => {
+      const win = { webContents: { id: 42 } } as unknown as BrowserWindow;
+      const dm = new DocumentManager(new PerfLog());
+      const ctx = new WindowContext(win, dm);
+      dm.openUntitled('/Users/x/Documents/Untitled.md', 'Heading');
+      expect(ctx.docId).not.toBeNull(); // it IS an open document…
+      expect(ctx.docPath).toBeNull(); // …but its placeholder path never matches
+      const reg2 = new ContextRegistry<ContextLike>();
+      reg2.add(ctx);
+      expect(reg2.byDocPath('/Users/x/Documents/Untitled.md', 'darwin')).toBeNull();
     });
   });
 });

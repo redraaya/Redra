@@ -406,6 +406,42 @@ body.drag-over .drop {
   border-color: var(--muted);
 }
 
+/* «New file» (⌘N) — a solid pill under the dashed drop zone (mockup §3). */
+.newfile {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+
+.newfile:hover {
+  border-color: var(--muted);
+}
+
+.newfile svg {
+  width: 15px;
+  height: 15px;
+  color: var(--accent);
+}
+
+.newfile kbd {
+  font-family: inherit;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 11px;
+}
+
 /* --- recents --------------------------------------------------------------- */
 
 .recent {

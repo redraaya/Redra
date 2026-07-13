@@ -52,7 +52,11 @@ export class WindowContext implements ContextLike {
   }
 
   get docPath(): string | null {
-    return this.docManager.currentDoc?.filePath ?? null;
+    const cur = this.docManager.currentDoc;
+    // An untitled doc's filePath is a placeholder, not a real file — it must
+    // never satisfy the "same file already open" lookup (two new files would
+    // collide, and opening a real file could focus an untitled window).
+    return cur && !cur.isUntitled ? cur.filePath : null;
   }
 }
 

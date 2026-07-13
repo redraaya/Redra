@@ -21,6 +21,9 @@ export type BlockKind =
 export const HTML_EXTENSIONS = ['html', 'htm'] as const;
 export const MD_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkd'] as const;
 
+/** Default filename for a new, never-saved Markdown document (⌘N). */
+export const UNTITLED_MD_NAME = 'Untitled.md';
+
 const HTML_RE = /\.html?$/i;
 const MD_RE = /\.(md|markdown|mdown|mkd)$/i;
 

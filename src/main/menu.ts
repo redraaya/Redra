@@ -3,7 +3,9 @@ import type { MenuItemConstructorOptions } from 'electron';
 import type { Translate } from '../shared/i18n.js';
 
 export interface MenuHandlers {
-  /** ⌘N — a new window with the start screen (Redra has no "new document"). */
+  /** ⌘N — a new untitled Markdown document (created in a free/new window). */
+  newFile(): void;
+  /** ⌘⇧N — a new empty window showing the start screen. */
   newWindow(): void;
   open(): void;
   save(): void;
@@ -81,9 +83,13 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
   }
 
   const fileSubmenu: MenuItemConstructorOptions[] = [
-    // ⌘N: Redra has no "new document" (it edits existing files), so the
-    // TextEdit-style accelerator opens a new window with the start screen.
-    { label: t('menu.newWindow'), accelerator: 'CmdOrCtrl+N', click: () => handlers.newWindow() },
+    // ⌘N mints a new Markdown document (v0.5); a blank window moves to ⌘⇧N.
+    { label: t('menu.newFile'), accelerator: 'CmdOrCtrl+N', click: () => handlers.newFile() },
+    {
+      label: t('menu.newWindow'),
+      accelerator: 'CmdOrCtrl+Shift+N',
+      click: () => handlers.newWindow(),
+    },
     { label: t('menu.open'), accelerator: 'CmdOrCtrl+O', click: () => handlers.open() },
     { type: 'separator' },
     // Standard macOS Close (⌘W). The unsaved-changes close guard intercepts

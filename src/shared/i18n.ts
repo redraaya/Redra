@@ -28,6 +28,7 @@ const STRINGS = {
   'menu.quitMac': { ru: 'Завершить Redra', en: 'Quit Redra' },
   'menu.quit': { ru: 'Выход', en: 'Exit' },
   'menu.file': { ru: 'Файл', en: 'File' },
+  'menu.newFile': { ru: 'Новый файл', en: 'New File' },
   'menu.newWindow': { ru: 'Новое окно', en: 'New Window' },
   'menu.open': { ru: 'Открыть…', en: 'Open…' },
   'menu.close': { ru: 'Закрыть окно', en: 'Close Window' },
@@ -109,10 +110,11 @@ const STRINGS = {
 
   // --- shell renderer (start screen + titlebar) -------------------------------
   'shell.tagline': {
-    ru: 'Откройте HTML-файл. Кликните в текст. Пишите.',
-    en: 'Open an HTML file. Click into the text. Write.',
+    ru: 'Откройте файл. Кликните в текст. Пишите.',
+    en: 'Open a file. Click into the text. Write.',
   },
   'shell.dropPrefix': { ru: 'Перетащите файл сюда — или ', en: 'Drop a file here — or ' },
+  'shell.newFile': { ru: 'Новый файл', en: 'New file' },
   'shell.recent': { ru: 'Недавние', en: 'Recent' },
   'shell.modePreview': { ru: 'Просмотр', en: 'Preview' },
   'shell.openTooltip': { ru: 'Открыть… (⌘O)', en: 'Open… (⌘O)' },
@@ -138,6 +140,8 @@ const STRINGS = {
   'shell.updateHide': { ru: 'Скрыть', en: 'Hide' },
 
   // --- doc editing overlay -----------------------------------------------------
+  // New-file starter: placeholder shown in the empty first heading (⌘N).
+  'doc.newHeadingPlaceholder': { ru: 'Заголовок', en: 'Heading' },
   'overlay.drag': { ru: 'Перетащить блок', en: 'Drag block' },
   'overlay.duplicate': { ru: 'Дублировать блок', en: 'Duplicate block' },
   'overlay.delete': { ru: 'Удалить блок', en: 'Delete block' },

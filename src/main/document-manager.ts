@@ -10,7 +10,7 @@ import type { PerfLog } from './lib/perf.js';
 import type { SaveResult } from '../shared/ipc.js';
 import type { DocFormat } from '../shared/doc-types.js';
 import { formatForPath } from '../shared/doc-types.js';
-import { parseMd, serializeMd } from './format/md-doc.js';
+import { parseMd, serializeMd, newUntitledMd } from './format/md-doc.js';
 import type { MdState } from './format/md-doc.js';
 
 /** Placeholder RedraDoc for md documents: OpenedDoc.doc is HTML-typed and
@@ -49,6 +49,14 @@ export interface OpenedDoc {
    * dirty (see isDirty) even with a clean journal.
    */
   restoredFromBackup: boolean;
+  /**
+   * A new (⌘N) document that has never been written: `filePath` is a mere
+   * placeholder for the title / Save-As default, NOT a file on disk. save()
+   * always routes through Save-As (needsPath) until the first write clears
+   * this. A CLEAN untitled doc is NOT dirty — it closes silently — but it IS
+   * savable (canSave), so ⌘S can commit the empty starter to disk.
+   */
+  isUntitled: boolean;
   /**
    * cloneBlock id mint: the next clone gets "c<counter+1>". Monotonic per
    * document and NEVER decremented (an undone cloneBlock still sits in the
@@ -100,6 +108,17 @@ export class DocumentManager {
   isDirty(): boolean {
     const cur = this.current;
     return !!cur && (cur.journal.dirty || cur.restoredFromBackup);
+  }
+
+  /**
+   * Is ⌘S meaningful right now? True when dirty, OR when the document is an
+   * untitled starter that has never hit disk (its first save writes the empty
+   * template). Kept separate from isDirty so the close guard stays silent on a
+   * pristine untitled doc while its Save button stays live.
+   */
+  canSave(): boolean {
+    const cur = this.current;
+    return this.isDirty() || (!!cur && cur.isUntitled);
   }
 
   setBackupEnabled(on: boolean): void {
@@ -163,6 +182,7 @@ export class DocumentManager {
       lastKnownMtimeMs: stat.mtimeMs,
       backupDone: false,
       restoredFromBackup: false,
+      isUntitled: false,
       cloneCounter: 0,
     };
     this.current = opened; // replaces any previous doc; its docId now 404s
@@ -175,6 +195,38 @@ export class DocumentManager {
       totalMs: tStamp - t0,
     };
     return { opened, timings };
+  }
+
+  /**
+   * New document (⌘N): an in-memory untitled Markdown doc. No disk read — the
+   * starter source is a single empty heading with a localized placeholder.
+   * `placeholderPath` is only a placeholder for the title (its basename) and
+   * the Save-As default location; nothing is written until the first save.
+   */
+  openUntitled(placeholderPath: string, headingPlaceholder: string): { opened: OpenedDoc } {
+    const resolved = path.resolve(placeholderPath);
+    const title = path.basename(resolved);
+    const { stampedHtml, state } = newUntitledMd(title, headingPlaceholder);
+    const opened: OpenedDoc = {
+      docId: randomUUID(),
+      filePath: resolved,
+      dir: path.dirname(resolved),
+      format: 'md',
+      doc: EMPTY_HTML_DOC(),
+      mdState: state,
+      journal: new Journal(),
+      originalBytes: Buffer.from(state.mdDoc.source, 'utf8'),
+      encoding: 'utf-8',
+      hadBom: false,
+      stampedHtml,
+      lastKnownMtimeMs: 0, // no file on disk yet
+      backupDone: true, // nothing to back up — there is no original file
+      restoredFromBackup: false,
+      isUntitled: true,
+      cloneCounter: 0,
+    };
+    this.current = opened;
+    return { opened };
   }
 
   /** Drop the document (it dies with its window — see the 'closed' handler). */
@@ -249,6 +301,7 @@ export class DocumentManager {
       lastKnownMtimeMs: st?.mtimeMs ?? cur.lastKnownMtimeMs,
       backupDone: true, // the pre-restore snapshot above IS this session's backup
       restoredFromBackup: true,
+      isUntitled: false, // restore only ever runs on an already-saved document
       cloneCounter: 0, // fresh document state — fresh journal, fresh mint
     };
     this.current = opened;
@@ -272,6 +325,11 @@ export class DocumentManager {
   async save(asPath?: string): Promise<SaveResult> {
     const cur = this.current;
     if (!cur) return { ok: false, error: 'Документ не открыт' };
+
+    // An untitled doc has no real path — a plain ⌘S must become Save As so the
+    // caller can prompt for a location (the save flow does this via effective
+    // Save-As; this guard also protects any direct save() call).
+    if (cur.isUntitled && asPath === undefined) return { ok: false, needsPath: true };
 
     const t0 = performance.now();
     const targetPath = path.resolve(asPath ?? cur.filePath);
@@ -338,6 +396,7 @@ export class DocumentManager {
         cur.dir = path.dirname(targetPath);
         cur.backupDone = true; // we just wrote this file ourselves; no original to back up
       }
+      cur.isUntitled = false; // written to disk now — a real file from here on
       cur.journal.markSaved();
       cur.restoredFromBackup = false; // the restored state is on disk now
       this.perf.record('save', performance.now() - t0, { bytes: bytes.length });

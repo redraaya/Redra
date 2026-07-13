@@ -44,9 +44,11 @@ beforeAll(async () => {
   // A redra stub: on* handlers stash the callback; promise methods resolve.
   const redra = {
     onDocOpened: (cb: (i: DocOpenedInfo) => void) => (onDocOpened = cb),
+    onDocRenamed: () => {},
     onEditAvailability: (cb: (s: EditAvailability) => void) => (onEditAvailability = cb),
     onDirtyChanged: () => {},
     onModeChanged: () => {},
+    newFile: () => Promise.resolve(),
     onNotice: () => {},
     onUpdateAvailable: () => {},
     onFindOpen: () => {},

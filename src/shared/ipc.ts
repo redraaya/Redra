@@ -95,7 +95,7 @@ export type OpenResult =
 
 export type SaveResult =
   | { ok: true; path: string; skipped?: boolean }
-  | { ok: false; canceled?: boolean; conflict?: boolean; error?: string };
+  | { ok: false; canceled?: boolean; conflict?: boolean; needsPath?: boolean; error?: string };
 
 export type ExportResult =
   | { ok: true; path: string }
@@ -129,6 +129,9 @@ export interface DocOpenedInfo {
 
 export interface DirtyState {
   dirty: boolean;
+  /** Save is meaningful even when not dirty — an untitled doc needs its first
+   *  write. The shell enables the Save button on this, not on `dirty`. */
+  canSave: boolean;
 }
 
 export interface ModeState {
@@ -256,6 +259,8 @@ export interface TipInfo {
 export interface RedraShellApi {
   openFileDialog(): Promise<OpenResult>;
   openPath(path: string): Promise<OpenResult>;
+  /** ⌘N / start-screen button: create a new untitled Markdown document. */
+  newFile(): Promise<OpenResult>;
   /** Resolve a dropped File to its filesystem path (webUtils under the hood). */
   pathForFile(file: File): string;
   save(): Promise<SaveResult>;
@@ -286,6 +291,9 @@ export interface RedraShellApi {
   setSettings(patch: Partial<Settings>): Promise<Settings>;
   getPerf(): Promise<PerfEntry[]>;
   onDocOpened(cb: (info: DocOpenedInfo) => void): void;
+  /** Path/name changed under an open document (Save As / first save of an
+   *  untitled doc) — update the titlebar without a full re-open. */
+  onDocRenamed(cb: (info: DocOpenedInfo) => void): void;
   onDirtyChanged(cb: (state: DirtyState) => void): void;
   onModeChanged(cb: (state: ModeState) => void): void;
   onNotice(cb: (notice: NoticeInfo) => void): void;

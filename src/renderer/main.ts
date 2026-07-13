@@ -46,6 +46,7 @@ const findClose = $('find-close') as HTMLButtonElement;
 const recentBlock = $('recent-block');
 const recentsEl = $('recents');
 const dropPill = $('drop-pill') as HTMLButtonElement;
+const btnNewFile = $('new-file') as HTMLButtonElement;
 
 // --- language -----------------------------------------------------------------
 
@@ -87,6 +88,8 @@ updateClose.setAttribute('aria-label', t('shell.updateHide'));
   const hotkey = document.createElement('b');
   hotkey.textContent = '⌘O';
   dropPill.replaceChildren(t('shell.dropPrefix'), hotkey);
+  const newFileLabel = document.querySelector('.newfile-label');
+  if (newFileLabel) newFileLabel.textContent = t('shell.newFile');
 }
 
 // --- theme ------------------------------------------------------------------
@@ -215,6 +218,7 @@ redra.onFindResult((result) => {
 // --- start screen: the drop pill doubles as «Open…» -----------------------------
 
 dropPill.addEventListener('click', () => void redra.openFileDialog());
+btnNewFile.addEventListener('click', () => void redra.newFile());
 
 // --- document state -----------------------------------------------------------
 
@@ -241,10 +245,17 @@ redra.onDocOpened((info) => {
   void renderRecents();
 });
 
+// Save As / an untitled doc's first save renamed the open document — refresh
+// the titlebar name in place (no doc:opened, so find + undo/redo stay intact).
+redra.onDocRenamed((info) => {
+  docName.textContent = info.name;
+});
+
 redra.onDirtyChanged((state) => {
   dirtyDot.hidden = !state.dirty;
-  // Subtle disabled look when there is nothing to save.
-  btnSave.disabled = !state.dirty;
+  // Save stays live for an untitled doc even when clean (canSave), so its first
+  // ⌘S can write the starter to disk; the dirty dot still tracks real edits.
+  btnSave.disabled = !state.canSave;
 });
 
 redra.onModeChanged((state) => {

@@ -23,7 +23,7 @@ import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
 import { guardCloneBlock, guardDocPush } from './lib/op-guard.js';
 import { guardMd, renderMdCloneFragment, telegramFlavors } from './format/md-doc.js';
-import { OPENABLE_RE } from '../shared/doc-types.js';
+import { OPENABLE_RE, UNTITLED_MD_NAME } from '../shared/doc-types.js';
 import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
 import { getElementById, renderCloneFragment } from '../engine/index.js';
 import {
@@ -62,6 +62,9 @@ const SMOKE = cliArgs.includes('--smoke');
 const cliFile = cliArgs.find((a) => !a.startsWith('-') && OPENABLE_RE.test(a));
 const shotIdx = cliArgs.indexOf('--screenshot');
 const shotPath = shotIdx >= 0 ? (cliArgs[shotIdx + 1] ?? null) : null;
+// Hidden startup: open a fresh untitled Markdown doc (⌘N) — for the new-file
+// README screenshot and manual QA of the empty-heading state.
+const START_NEW_FILE = cliArgs.includes('--new-file');
 
 // Redra stores no cookies, passwords or encrypted state, so Chromium's
 // OSCrypt "Safe Storage" key in the macOS keychain serves no purpose — and
@@ -156,6 +159,7 @@ function sendToShell(ctx: WindowContext, channel: string, payload: unknown): voi
 /** Handlers shared by every (re)build of the application menu. All doc-bound
  * actions resolve the FOCUSED window's context at click time. */
 const menuHandlers = {
+  newFile: () => void newFile(),
   newWindow: () => {
     createWindowContext();
   },
@@ -391,11 +395,14 @@ async function onReady(): Promise<void> {
 
   const pending = drainPendingOpen();
   if (pending) await pending;
+  // `--new-file` mints an untitled doc when no file was queued on the CLI.
+  if (START_NEW_FILE && pending === null) await newFile();
+  const hasDoc = pending !== null || START_NEW_FILE;
   smoke.onReady(pending !== null);
   shot.schedule(
     () => registry.all()[0]?.win ?? null,
     () => registry.all()[0]?.docView ?? null,
-    pending !== null,
+    hasDoc,
   );
 }
 
@@ -731,8 +738,12 @@ function commitActiveEdit(ctx: WindowContext): Promise<void> {
 }
 
 function broadcastDirty(ctx: WindowContext): void {
-  // isDirty covers both journal ops and a restored-but-unsaved backup.
-  sendToShell(ctx, 'doc:dirtyChanged', { dirty: ctx.docManager.isDirty() });
+  // isDirty covers both journal ops and a restored-but-unsaved backup; canSave
+  // additionally covers a pristine untitled doc (savable, but not dirty).
+  sendToShell(ctx, 'doc:dirtyChanged', {
+    dirty: ctx.docManager.isDirty(),
+    canSave: ctx.docManager.canSave(),
+  });
 }
 
 // --- open flow ---------------------------------------------------------------
@@ -816,6 +827,52 @@ async function openDocument(filePath: string, prefer?: WindowContext): Promise<O
   }
 }
 
+/**
+ * ⌘N / start-screen "New file": create a new untitled Markdown document and
+ * load it into a free window — the focused start screen when there is one,
+ * else a fresh window. Same routing as an open, minus the recents / already-
+ * open lookup an in-memory untitled doc has nothing to match.
+ */
+async function newFile(prefer?: WindowContext): Promise<OpenResult> {
+  const isFree = (c: WindowContext): boolean =>
+    isFreeForOpen({
+      hasDoc: !!c.docManager.currentDoc,
+      closeFlowActive: c.saveFlow.isCloseFlowActive(),
+      opening: c.opening,
+    });
+  const target =
+    prefer && registry.byShellWcId(prefer.shellWcId) === prefer && isFree(prefer)
+      ? prefer
+      : chooseOpenTarget(focusedCtx(), registry.all(), isFree);
+  const ctx = target ?? createWindowContext();
+  const createdFresh = target === null;
+  ctx.opening = true;
+
+  try {
+    const placeholderPath = path.join(app.getPath('documents'), UNTITLED_MD_NAME);
+    const { opened } = ctx.docManager.openUntitled(placeholderPath, t('doc.newHeadingPlaceholder'));
+    const view = ensureDocView(ctx);
+    await view.webContents.loadURL(`redra://doc/${opened.docId}/`);
+
+    const name = path.basename(opened.filePath);
+    if (!ctx.win.isDestroyed()) ctx.win.setTitle(`${name} — Redra`);
+    sendToShell(ctx, 'doc:opened', { path: opened.filePath, name });
+    broadcastDirty(ctx); // clean but savable → Save enabled, no dirty dot
+    setPreview(ctx, false);
+    void rebuildAppMenu();
+    return { ok: true, path: opened.filePath, name };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[new] failed:', message);
+    if (SMOKE) app.exit(1);
+    else dialog.showErrorBox(t('error.openTitle'), message);
+    if (createdFresh && !ctx.win.isDestroyed() && !ctx.docManager.currentDoc) ctx.win.destroy();
+    return { ok: false, error: message };
+  } finally {
+    ctx.opening = false;
+  }
+}
+
 async function openViaDialog(): Promise<OpenResult> {
   // Parent the dialog to the focused window when there is one; with all
   // windows closed (macOS menu stays alive) the dialog opens unparented.
@@ -853,6 +910,12 @@ function registerIpc(): void {
     // Drop / recents click: the window the request came from is the natural
     // target when it still shows the start screen (a drop does not focus it).
     return openDocument(filePath, ctx);
+  });
+  ipcMain.handle('doc:newFile', (event) => {
+    const ctx = shellCtx(event);
+    if (!ctx) return { ok: false, error: 'bad sender' } satisfies OpenResult;
+    // Same target rule as open: prefer THIS window when it's a free start screen.
+    return newFile(ctx);
   });
   ipcMain.handle('doc:save', (event) => {
     const ctx = shellCtx(event);

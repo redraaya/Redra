@@ -19,6 +19,7 @@ import {
   mdBlockIndexOf,
   toMarkdownV2,
   toTelegramHtml,
+  escapeHtml,
 } from '../../md/index.js';
 import type { MdDoc, MdFlavor, MdDefinition } from '../../md/index.js';
 import { MD_THEME } from './md-theme.js';
@@ -34,6 +35,35 @@ export interface MdState {
 export function parseMd(text: string, title: string): { stampedHtml: string; state: MdState } {
   const mdDoc = parseMarkdownDoc(text);
   const body = renderDocumentBody(mdDoc.blocks);
+  const stampedHtml = buildDocShell(title, body, MD_THEME);
+  return { stampedHtml, state: { mdDoc, flavor: sniffFlavor(mdDoc), mintedClones: new Set() } };
+}
+
+/** The source a new (⌘N) untitled document starts from: a single empty
+ *  heading — the caret's home, "just start typing" (matches the mockup). */
+export const UNTITLED_MD_SOURCE = '# ';
+
+/**
+ * Build the served shell for a NEW untitled Markdown document. Same pipeline
+ * as parseMd, but the lone empty heading carries a localized `data-redra-ph`
+ * placeholder so the first block is visible and clickable before any typing.
+ * The attribute is presentation-only (it never enters the source or the save
+ * path — materialize re-renders from the pristine slice), so it cannot corrupt
+ * a save.
+ */
+export function newUntitledMd(
+  title: string,
+  placeholder: string,
+): { stampedHtml: string; state: MdState } {
+  const mdDoc = parseMarkdownDoc(UNTITLED_MD_SOURCE);
+  const bare = renderDocumentBody(mdDoc.blocks);
+  // renderDocumentBody stamps the heading as `<h1 data-redra-id="m0"></h1>`;
+  // splice in the placeholder attribute. If the render ever changes shape the
+  // replace is a no-op and the doc still works (just without the hint).
+  const body = bare.replace(
+    '<h1 data-redra-id="m0">',
+    `<h1 data-redra-id="m0" data-redra-ph="${escapeHtml(placeholder)}">`,
+  );
   const stampedHtml = buildDocShell(title, body, MD_THEME);
   return { stampedHtml, state: { mdDoc, flavor: sniffFlavor(mdDoc), mintedClones: new Set() } };
 }

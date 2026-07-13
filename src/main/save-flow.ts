@@ -97,12 +97,17 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     const cur = docManager.currentDoc;
     if (!cur) return { ok: false, error: deps.t('error.noDocument') };
 
+    // An untitled (⌘N) doc has no file yet, so even a plain ⌘S must prompt for
+    // a location — treat it as Save As. The path it lands at is a rename.
+    const effectiveSaveAs = saveAs || cur.isUntitled;
+    const prevPath = cur.filePath;
+
     // An active edit session must land in the journal before serialization.
     await deps.commitActiveEdit();
 
     const win = deps.getWin();
     let asPath: string | undefined;
-    if (saveAs) {
+    if (effectiveSaveAs) {
       if (!win || win.isDestroyed()) return { ok: false, error: 'no window' };
       const result = await dialog.showSaveDialog(win, {
         defaultPath: cur.filePath,
@@ -153,7 +158,16 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
       if (w && !w.isDestroyed()) {
         const name = path.basename(saved.path);
         w.setTitle(`${name} — Redra`);
-        w.webContents.send('doc:dirtyChanged', { dirty: docManager.isDirty() });
+        // Save As / an untitled doc's first save changed the path: refresh the
+        // shell titlebar name without a full re-open (which would reset find /
+        // undo-redo affordances). Byte-path compare is enough here.
+        if (saved.path !== prevPath) {
+          w.webContents.send('doc:renamed', { path: saved.path, name });
+        }
+        w.webContents.send('doc:dirtyChanged', {
+          dirty: docManager.isDirty(),
+          canSave: docManager.canSave(),
+        });
       }
     } else if (!saved.canceled) {
       // Generic failure (apply/serialize/write) — must never be silent.
