@@ -2,6 +2,7 @@ import { REDRA_ID_ATTR } from '../../engine/types.js';
 import { makeT, pickLang } from '../../shared/i18n.js';
 import { SelectionToolbar, TOOLBAR_CSS } from './toolbar.js';
 import type { ToolbarAction } from './toolbar.js';
+import type { DocFormat } from '../../shared/doc-types.js';
 
 /**
  * Floating editor chrome: the block handle pill (⋮⋮ grip + duplicate +
@@ -188,7 +189,7 @@ export class Overlay {
   private block: HTMLElement | null = null;
   private image: HTMLElement | null = null;
 
-  constructor(doc: Document, callbacks: OverlayCallbacks) {
+  constructor(doc: Document, callbacks: OverlayCallbacks, format: DocFormat = 'html') {
     // The isolated world shares navigator.language with the page — both come
     // from the system locale, which is exactly the auto-language contract.
     const t = makeT(pickLang(navigator.language));
@@ -213,8 +214,12 @@ export class Overlay {
     style.textContent = SHADOW_CSS + TOOLBAR_CSS;
     root.appendChild(style);
 
-    this.toolbar = new SelectionToolbar(doc, root, t, (action, value) =>
-      callbacks.onToolbar(action, value),
+    this.toolbar = new SelectionToolbar(
+      doc,
+      root,
+      t,
+      (action, value) => callbacks.onToolbar(action, value),
+      format,
     );
 
     this.handle = doc.createElement('div');

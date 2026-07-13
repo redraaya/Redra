@@ -61,7 +61,7 @@ window.addEventListener('DOMContentLoaded', () => {
   // ins/del) that the HTML profile would strip — see normalizeEditedHtml.
   const format = document.documentElement.getAttribute('data-redra-format') === 'md' ? 'md' : 'html';
   const normalize = format === 'md' ? (raw: string) => normalizeEditedHtml(raw, 'md') : undefined;
-  controller = createEditorController(window, bridge, normalize);
+  controller = createEditorController(window, bridge, normalize, format);
   controller.setEditing(wantEditing);
   // Liveness beacon: main's smoke mode fails the run when this never arrives
   // (e.g. the preload died on a bundling error — the editing layer IS the app).

@@ -156,6 +156,7 @@ function writeInlineNode(node: P5Node, ctx: Ctx): string {
       return wrapNonEmpty(writeInlineChildren(node, ctx), f.italic);
     case 's':
     case 'del':
+    case 'strike':
       return wrapNonEmpty(writeInlineChildren(node, ctx), f.strike);
     case 'u':
     case 'ins': {

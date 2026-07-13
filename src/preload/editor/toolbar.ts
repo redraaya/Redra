@@ -16,7 +16,17 @@ import { closestTag } from './format.js';
  * contenteditable; the link input is the one deliberate exception.
  */
 
-export type ToolbarAction = 'bold' | 'italic' | 'code' | 'link' | 'unlink';
+import type { DocFormat } from '../../shared/doc-types.js';
+
+export type ToolbarAction =
+  | 'bold'
+  | 'italic'
+  | 'underline'
+  | 'strike'
+  | 'spoiler'
+  | 'code'
+  | 'link'
+  | 'unlink';
 
 /**
  * What the link input's Enter applies: people type «example.com/path» and
@@ -50,6 +60,11 @@ export interface ToolbarState {
   code: boolean;
   /** href of the <a> the selection sits in, or null when not in a link. */
   link: string | null;
+  // Markdown-only entities — optional so the HTML path's state literals stay
+  // valid unchanged (absent ⇒ inactive).
+  underline?: boolean;
+  strike?: boolean;
+  spoiler?: boolean;
 }
 
 export interface RectLike {
@@ -94,7 +109,12 @@ export const TOOLBAR_CSS = `
 .fmtbar button.active { background: rgba(28, 27, 25, 0.09); color: #1c1b19; }
 .fmtbar .b { font-weight: 700; }
 .fmtbar .i { font-style: italic; font-family: Georgia, serif; }
+.fmtbar .u { text-decoration: underline; text-underline-offset: 2px; }
+.fmtbar .s { text-decoration: line-through; }
+.fmtbar .sp { filter: blur(1.6px); font-size: 11px; letter-spacing: 0.5px; }
 .fmtbar .c { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; }
+.fmtbar .sep { width: 1px; height: 16px; margin: 0 3px; background: rgba(28, 27, 25, 0.12); }
+@media (prefers-color-scheme: dark) { .fmtbar .sep { background: rgba(236, 234, 230, 0.14); } }
 .fmtbar input {
   all: initial;
   width: 180px;
@@ -136,13 +156,47 @@ const UNLINK_SVG =
   '<line x1="8" y1="2" x2="8" y2="5"/><line x1="2" y1="8" x2="5" y2="8"/>' +
   '<line x1="16" y1="19" x2="16" y2="22"/><line x1="19" y1="16" x2="22" y2="16"/></svg>';
 
+/** One quick-toolbar button. `link` is special (opens the URL input). */
+interface ToolButtonDef {
+  id: Exclude<ToolbarAction, 'unlink'>;
+  cls: string;
+  titleKey: Parameters<Translate>[0];
+  glyph: { text?: string; html?: string };
+  formats: ReadonlySet<DocFormat>;
+  active: (s: ToolbarState) => boolean;
+  /** A hairline separator is drawn BEFORE this button. */
+  sepBefore?: boolean;
+}
+
+const BOTH: ReadonlySet<DocFormat> = new Set<DocFormat>(['html', 'md']);
+const MD_ONLY: ReadonlySet<DocFormat> = new Set<DocFormat>(['md']);
+
+/**
+ * The quick toolbar (tier 1). HTML keeps EXACTLY its four buttons (bold,
+ * italic, code, link) so its behaviour is byte-identical; Markdown grows the
+ * Telegram inline set (underline, strikethrough, spoiler). The tier-2 "More"
+ * panel (block types + rich extras) is added separately.
+ */
+const TOOL_BUTTONS: readonly ToolButtonDef[] = [
+  { id: 'bold', cls: 'b', titleKey: 'toolbar.bold', glyph: { text: 'B' }, formats: BOTH, active: (s) => s.bold },
+  { id: 'italic', cls: 'i', titleKey: 'toolbar.italic', glyph: { text: 'I' }, formats: BOTH, active: (s) => s.italic },
+  { id: 'underline', cls: 'u', titleKey: 'toolbar.underline', glyph: { text: 'U' }, formats: MD_ONLY, active: (s) => !!s.underline },
+  { id: 'strike', cls: 's', titleKey: 'toolbar.strikethrough', glyph: { text: 'S' }, formats: MD_ONLY, active: (s) => !!s.strike },
+  { id: 'spoiler', cls: 'sp', titleKey: 'toolbar.spoiler', glyph: { text: 'аб' }, formats: MD_ONLY, active: (s) => !!s.spoiler },
+  { id: 'code', cls: 'c', titleKey: 'toolbar.code', glyph: { text: '<>' }, formats: BOTH, active: (s) => s.code, sepBefore: true },
+  { id: 'link', cls: 'l', titleKey: 'toolbar.link', glyph: { html: LINK_SVG }, formats: BOTH, active: (s) => s.link !== null },
+];
+
 export class SelectionToolbar {
   private readonly bar: HTMLElement;
-  private readonly buttons: { bold: HTMLButtonElement; italic: HTMLButtonElement; code: HTMLButtonElement; link: HTMLButtonElement };
+  /** Rendered buttons for THIS format, with their active-state predicate. */
+  private readonly buttons: Array<{ el: HTMLButtonElement; active: (s: ToolbarState) => boolean; sepBefore: boolean }>;
   private readonly linkInput: HTMLInputElement;
   private readonly unlinkBtn: HTMLButtonElement;
   private readonly doc: Document;
-  private state: ToolbarState = { bold: false, italic: false, code: false, link: null };
+  private state: ToolbarState = {
+    bold: false, italic: false, underline: false, strike: false, spoiler: false, code: false, link: null,
+  };
   private inLinkMode = false;
 
   constructor(
@@ -150,6 +204,7 @@ export class SelectionToolbar {
     parent: ParentNode,
     t: Translate,
     private readonly onAction: (action: ToolbarAction, value?: string) => void,
+    format: DocFormat = 'html',
   ) {
     this.doc = doc;
     this.bar = doc.createElement('div');
@@ -172,12 +227,13 @@ export class SelectionToolbar {
       return b;
     };
 
-    this.buttons = {
-      bold: makeButton('b', t('toolbar.bold'), { text: 'B' }, () => this.onAction('bold')),
-      italic: makeButton('i', t('toolbar.italic'), { text: 'I' }, () => this.onAction('italic')),
-      code: makeButton('c', t('toolbar.code'), { text: '<>' }, () => this.onAction('code')),
-      link: makeButton('l', t('toolbar.link'), { html: LINK_SVG }, () => this.enterLinkMode()),
-    };
+    this.buttons = TOOL_BUTTONS.filter((def) => def.formats.has(format)).map((def) => ({
+      el: makeButton(def.cls, t(def.titleKey), def.glyph, () =>
+        def.id === 'link' ? this.enterLinkMode() : this.onAction(def.id),
+      ),
+      active: def.active,
+      sepBefore: def.sepBefore ?? false,
+    }));
 
     this.linkInput = doc.createElement('input');
     this.linkInput.setAttribute('type', 'text');
@@ -196,12 +252,12 @@ export class SelectionToolbar {
       }
     });
 
-    this.unlinkBtn = makeButton('u', t('toolbar.removeLink'), { html: UNLINK_SVG }, () => {
+    this.unlinkBtn = makeButton('l', t('toolbar.removeLink'), { html: UNLINK_SVG }, () => {
       this.exitLinkMode();
       this.onAction('unlink');
     });
 
-    this.bar.append(this.buttons.bold, this.buttons.italic, this.buttons.code, this.buttons.link);
+    this.renderButtons();
     parent.appendChild(this.bar);
   }
 
@@ -259,11 +315,15 @@ export class SelectionToolbar {
 
   private renderButtons(): void {
     this.bar.textContent = '';
-    this.bar.append(this.buttons.bold, this.buttons.italic, this.buttons.code, this.buttons.link);
-    this.buttons.bold.classList.toggle('active', this.state.bold);
-    this.buttons.italic.classList.toggle('active', this.state.italic);
-    this.buttons.code.classList.toggle('active', this.state.code);
-    this.buttons.link.classList.toggle('active', this.state.link !== null);
+    for (const btn of this.buttons) {
+      if (btn.sepBefore) {
+        const sep = this.doc.createElement('span');
+        sep.className = 'sep';
+        this.bar.appendChild(sep);
+      }
+      btn.el.classList.toggle('active', btn.active(this.state));
+      this.bar.appendChild(btn.el);
+    }
   }
 }
 
@@ -304,14 +364,23 @@ export function selectionContext(
       return false;
     }
   };
-  const linkEl = closestTag(range.commonAncestorContainer, 'a', sessionEl);
+  const anc = range.commonAncestorContainer;
+  const linkEl = closestTag(anc, 'a', sessionEl);
   return {
     rect,
     range,
     state: {
       bold: qcs('bold'),
       italic: qcs('italic'),
-      code: closestTag(range.commonAncestorContainer, 'code', sessionEl) !== null,
+      // execCommand state where Chromium tracks it, plus a tag fallback so a
+      // <u>/<s>/<tg-spoiler> the selection already sits in reads as active.
+      underline: qcs('underline') || closestTag(anc, 'u', sessionEl) !== null,
+      strike:
+        qcs('strikeThrough') ||
+        closestTag(anc, 's', sessionEl) !== null ||
+        closestTag(anc, 'del', sessionEl) !== null,
+      spoiler: closestTag(anc, 'tg-spoiler', sessionEl) !== null,
+      code: closestTag(anc, 'code', sessionEl) !== null,
       link: linkEl ? linkEl.getAttribute('href') : null,
     },
   };

@@ -87,7 +87,7 @@ function filterAttrs(el: P5Element): void {
  *  itself emits — so the writer speaks ONE dialect (<b> and <strong> would
  *  otherwise round-trip to different DOM). The file's bytes are untouched:
  *  this only shapes the DERIVED view. */
-const CANONICAL_TAG: Record<string, string> = { b: 'strong', i: 'em', del: 's', ins: 'u' };
+const CANONICAL_TAG: Record<string, string> = { b: 'strong', i: 'em', del: 's', strike: 's', ins: 'u' };
 
 /** Walk + prune in place. Returns true when the subtree contains an element
  *  outside EDIT_SAFE (⇒ enclosing island must go read-only). */

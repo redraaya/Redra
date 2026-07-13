@@ -5,6 +5,7 @@ import {
 } from '../../engine/normalize.js';
 import { REDRA_ID_ATTR } from '../../engine/types.js';
 import type { RedraDocBridge } from '../../shared/ipc.js';
+import type { DocFormat } from '../../shared/doc-types.js';
 import { resolveEditable } from './editable.js';
 import { resolveBlock } from './blocks.js';
 import { beginSession, revertSession, endVisuals, isUndoGroupBoundary } from './session.js';
@@ -46,6 +47,7 @@ export function createEditorController(
   win: Window,
   bridge: RedraDocBridge,
   normalize: Normalize = normalizeEditedHtml,
+  format: DocFormat = 'html',
 ): EditorController {
   const doc = win.document;
   const history = new LocalHistory();
@@ -107,7 +109,7 @@ export function createEditorController(
       void replaceImageViaPick(img);
     },
     onToolbar: (action, value) => handleToolbarAction(action, value),
-  });
+  }, format);
 
   /** Last selection range shown in the toolbar — restored for link actions
    *  (the link input legitimately steals focus and with it the selection). */
@@ -341,6 +343,29 @@ export function createEditorController(
     sel.addRange(lastSelectionRange);
   }
 
+  /**
+   * Toggle a bare inline tag (code, tg-spoiler) over the selection. execCommand
+   * has no native command for these, so compute the wrap/unwrap and apply it as
+   * ONE insertHTML — it lands on the same native undo stack as bold/italic, and
+   * falls back to direct Range surgery when execCommand is unavailable (jsdom).
+   */
+  function toggleInline(tag: string): void {
+    if (!session) return;
+    const sel = win.getSelection?.();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    if (!session.el.contains(range.commonAncestorContainer)) return;
+    const plan = computeInlineToggle(range, tag, session.el);
+    sel.removeAllRanges();
+    sel.addRange(plan.selectRange);
+    const inserted = doc.execCommand?.('insertHTML', false, plan.html) === true;
+    if (!inserted) {
+      toggleInlineTag(range, tag, session.el);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
   function handleToolbarAction(action: ToolbarAction, value?: string): void {
     if (!session) return;
     // Seal the typed tail as its OWN step before the format, then the format as
@@ -356,32 +381,19 @@ export function createEditorController(
       case 'italic':
         doc.execCommand?.('italic');
         break;
-      case 'code': {
-        // execCommand has no native "code" command. Compute the wrap/unwrap
-        // (decision identical to toggleInlineTag) and apply it as ONE
-        // insertHTML so it lands on the SAME native undo stack as
-        // bold/italic/typing — ⌘Z then reverts it in correct chronological
-        // order. insertHTML replaces the current selection, so we first
-        // select the range the plan tells us to (the whole <code> element for
-        // an unwrap, the user's selection for a wrap).
-        const sel = win.getSelection?.();
-        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) break;
-        const range = sel.getRangeAt(0);
-        if (!session.el.contains(range.commonAncestorContainer)) break;
-        const plan = computeInlineToggle(range, 'code', session.el);
-        sel.removeAllRanges();
-        sel.addRange(plan.selectRange);
-        // insertHTML records on the native stack; fall back to direct Range
-        // surgery when execCommand is unavailable (jsdom) or it reports
-        // failure (older engines), so the toggle still works there.
-        const inserted = doc.execCommand?.('insertHTML', false, plan.html) === true;
-        if (!inserted) {
-          toggleInlineTag(range, 'code', session.el);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
+      case 'underline':
+        doc.execCommand?.('underline');
         break;
-      }
+      case 'strike':
+        doc.execCommand?.('strikeThrough');
+        break;
+      case 'code':
+        toggleInline('code');
+        break;
+      case 'spoiler':
+        // Telegram spoiler — a bare <tg-spoiler> toggle (same machinery as code).
+        toggleInline('tg-spoiler');
+        break;
       case 'link':
         if (!value) break;
         restoreSelection();

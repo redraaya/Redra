@@ -281,7 +281,13 @@ function normalizeSiblings(
  *  (Telegram-Rich entities the writer knows how to serialize). Kept separate
  *  from KEPT_TAGS so the HTML path — and the provenance gate that imports
  *  KEPT_TAGS — stay byte-identical. */
-export const MD_KEPT_TAGS: ReadonlySet<string> = new Set([...KEPT_TAGS, 'tg-spoiler', 'ins', 'del']);
+export const MD_KEPT_TAGS: ReadonlySet<string> = new Set([
+  ...KEPT_TAGS,
+  'tg-spoiler',
+  'ins', // execCommand underline can emit <ins> in some engines
+  'del',
+  'strike', // execCommand('strikeThrough') emits the deprecated <strike>
+]);
 
 export function normalizeEditedHtml(raw: string, profile: 'html' | 'md' = 'html'): string {
   const kept = profile === 'md' ? MD_KEPT_TAGS : KEPT_TAGS;
