@@ -44,6 +44,8 @@ const STRINGS = {
   'menu.redo': { ru: 'Повторить', en: 'Redo' },
   'menu.cut': { ru: 'Вырезать', en: 'Cut' },
   'menu.copy': { ru: 'Скопировать', en: 'Copy' },
+  'menu.copyTelegram': { ru: 'Скопировать для Telegram', en: 'Copy for Telegram' },
+  'notice.copiedTelegram': { ru: 'Скопировано для Telegram', en: 'Copied for Telegram' },
   'menu.paste': { ru: 'Вставить', en: 'Paste' },
   'menu.selectAll': { ru: 'Выделить всё', en: 'Select All' },
   'menu.view': { ru: 'Вид', en: 'View' },

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, Menu, WebContentsView, clipboard, dialog, ipcMain, session, shell } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent, Session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -22,7 +22,7 @@ import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
 import { guardCloneBlock, guardDocPush } from './lib/op-guard.js';
-import { guardMd, renderMdCloneFragment } from './format/md-doc.js';
+import { guardMd, renderMdCloneFragment, telegramFlavors } from './format/md-doc.js';
 import { OPENABLE_RE } from '../shared/doc-types.js';
 import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
 import { getElementById, renderCloneFragment } from '../engine/index.js';
@@ -179,7 +179,25 @@ const menuHandlers = {
     const ctx = focusedCtx();
     if (ctx) void restoreVersion(ctx, v);
   },
+  copyTelegram: () => {
+    const ctx = focusedCtx();
+    if (ctx) void copyForTelegram(ctx);
+  },
 };
+
+/**
+ * "Copy for Telegram": commit any in-flight edit, render the CURRENT Markdown
+ * content in both Telegram clipboard flavors (MarkdownV2 + HTML parse-mode),
+ * and write them. Pasting into Telegram Desktop keeps the formatting live.
+ */
+async function copyForTelegram(ctx: WindowContext): Promise<void> {
+  await commitActiveEdit(ctx);
+  const cur = ctx.docManager.currentDoc;
+  if (!cur || cur.format !== 'md' || !cur.mdState) return;
+  const { markdownV2, html } = telegramFlavors(cur.mdState, cur.journal.ops);
+  clipboard.write({ text: markdownV2, html });
+  sendToShell(ctx, 'notice:show', { text: t('notice.copiedTelegram') });
+}
 
 /** Monotonic token: rapid focus switches start overlapping rebuilds, and the
  * slowest readdir must not install a menu for a window no longer focused. */
@@ -215,6 +233,7 @@ async function rebuildAppMenu(): Promise<void> {
     backupChecked: settingsStore.get().backupOnFirstSave,
     t,
     docOpen: !!cur,
+    isMarkdown: cur?.format === 'md',
     previewChecked: ctx?.previewOn ?? false,
     versions,
   });

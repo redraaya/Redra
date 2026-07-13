@@ -17,6 +17,8 @@ import {
   sniffFlavor,
   mdRootOf,
   mdBlockIndexOf,
+  toMarkdownV2,
+  toTelegramHtml,
 } from '../../md/index.js';
 import type { MdDoc, MdFlavor, MdDefinition } from '../../md/index.js';
 import { MD_THEME } from './md-theme.js';
@@ -39,6 +41,17 @@ export function parseMd(text: string, title: string): { stampedHtml: string; sta
 /** Save text (the .md source) for a set of journal ops. */
 export function serializeMd(state: MdState, ops: readonly Op[]): string {
   return serializeMdSource(state.mdDoc, ops, state.flavor);
+}
+
+/**
+ * "Copy for Telegram": the document's CURRENT content (journal ops applied,
+ * re-parsed) rendered as both clipboard flavors — MarkdownV2 (for the classic
+ * composer / Bot API) and Telegram HTML parse-mode (Desktop pastes it rich).
+ */
+export function telegramFlavors(state: MdState, ops: readonly Op[]): { markdownV2: string; html: string } {
+  const source = serializeMdSource(state.mdDoc, ops, state.flavor);
+  const tree = parseMarkdownDoc(source).tree;
+  return { markdownV2: toMarkdownV2(tree), html: toTelegramHtml(tree) };
 }
 
 export type MdGuardResult =

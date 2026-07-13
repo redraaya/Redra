@@ -23,6 +23,9 @@ export interface MenuHandlers {
   showBackups(): void;
   /** "Version History" item clicked — confirm + restore flow lives in main. */
   restoreVersion(version: VersionMenuItem): void;
+  /** ⌥⌘C — copy the current Markdown document to the clipboard in Telegram's
+   *  MarkdownV2 + HTML flavors (Markdown documents only). */
+  copyTelegram(): void;
 }
 
 /** One entry of the "Version History" submenu (built by main from BackupStore.list). */
@@ -42,6 +45,8 @@ export interface MenuOptions {
   t: Translate;
   /** A document is open: doc-only items start enabled. */
   docOpen?: boolean;
+  /** The open document is Markdown — enables "Copy for Telegram". */
+  isMarkdown?: boolean;
   /** Current Preview state for the View checkbox. */
   previewChecked?: boolean;
   /** "Version History" entries for the current document, newest first (≤10). */
@@ -152,6 +157,13 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
       { role: 'paste', label: t('menu.paste') },
       { role: 'selectAll', label: t('menu.selectAll') },
       { type: 'separator' },
+      {
+        id: 'edit-copy-telegram',
+        label: t('menu.copyTelegram'),
+        accelerator: 'CmdOrCtrl+Alt+C',
+        enabled: docOpen && (options.isMarkdown ?? false),
+        click: () => handlers.copyTelegram(),
+      },
       {
         id: 'edit-find',
         label: t('menu.find'),
