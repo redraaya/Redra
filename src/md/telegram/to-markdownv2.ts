@@ -28,6 +28,7 @@ type AnyNode = {
 /** Only http/https/mailto/tg destinations reach Telegram. */
 function safeUrl(url: string): string {
   const s = url.trim();
+  if (/\s/.test(s)) return ''; // a raw space is not a valid destination → drop the link
   return /^(https?:|mailto:|tg:|#|\/|\.)/i.test(s) || !/:/.test(s) ? s : '';
 }
 
@@ -78,16 +79,25 @@ function inlineNode(node: AnyNode): string {
 
 function block(node: AnyNode, depth: number): string {
   switch (node.type) {
-    case 'heading':
-      return `*${inline(node.children)}*`; // MarkdownV2 has no headings → bold line
+    case 'heading': {
+      // MarkdownV2 has no headings → a bold line. An EMPTY heading (e.g. the
+      // untitled '# ' starter) must emit nothing, not an empty '**' entity —
+      // Telegram rejects empty entities.
+      const inner = inline(node.children);
+      return inner ? `*${inner}*` : '';
+    }
     case 'paragraph':
       return inline(node.children);
     case 'blockquote':
+      // Telegram MarkdownV2 quotes are single-level: a second '>' on a line is
+      // reserved CONTENT and makes the Bot API reject the whole message. Strip
+      // any leading markers a nested blockquote produced, then add our single
+      // one — the nesting flattens (Telegram can't render it anyway).
       return (node.children ?? [])
         .map((c) => block(c, depth))
         .join('\n\n')
         .split('\n')
-        .map((l) => `>${l}`)
+        .map((l) => `>${l.replace(/^>+ ?/, '')}`)
         .join('\n');
     case 'list': {
       let n = node.start ?? 1;
@@ -105,6 +115,13 @@ function block(node: AnyNode, depth: number): string {
     }
     case 'math':
       return escapeV2(node.value ?? '');
+    case 'table':
+      // Telegram has no tables — flatten to one line per row, cells separated by
+      // an escaped pipe (a raw '|' is reserved and would be rejected). Without
+      // this the default case concatenates every cell into one run-on string.
+      return (node.children ?? [])
+        .map((row) => (row.children ?? []).map((cell) => inline(cell.children)).join(' \\| '))
+        .join('\n');
     case 'thematicBreak':
       return '—';
     case 'html':

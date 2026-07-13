@@ -53,6 +53,31 @@ describe('mdast → MarkdownV2 (Telegram classic composer)', () => {
   });
 });
 
+describe('mdast → MarkdownV2: adversarial-review regressions', () => {
+  it('a nested blockquote does not emit an unescaped inner ">" (Bot API reject)', () => {
+    const out = mv2('> > deep\n');
+    // Every line has exactly ONE leading marker; no line starts ">>".
+    for (const line of out.split('\n')) {
+      expect(line.startsWith('>>')).toBe(false);
+    }
+    expect(out).toContain('deep');
+  });
+  it('an empty heading emits nothing, not an empty "**" entity', () => {
+    expect(mv2('# \n')).toBe('');
+    expect(mv2('# \n\ntext\n')).toBe('text');
+  });
+  it('a table is flattened to rows with escaped pipe separators (no run-on)', () => {
+    const out = mv2('| a.b | c |\n|---|---|\n| 1! | 2 |\n');
+    expect(out).toContain('a\\.b \\| c');
+    expect(out).toContain('1\\! \\| 2');
+    expect(out).not.toContain('a\\.bc'); // cells no longer fused
+  });
+  it('a link URL containing a raw space is dropped (kept as text)', () => {
+    const out = mv2('[t](<https://e.com/a b>)\n');
+    expect(out).not.toContain('](');
+  });
+});
+
 describe('mdast → Telegram HTML parse-mode', () => {
   it('emits b/i/s/tg-spoiler and escapes text', () => {
     expect(tgHtml('**ж** *к* ~~з~~ ||с||\n')).toBe('<b>ж</b> <i>к</i> <s>з</s> <tg-spoiler>с</tg-spoiler>');
@@ -66,5 +91,14 @@ describe('mdast → Telegram HTML parse-mode', () => {
   });
   it('link with safe url', () => {
     expect(tgHtml('[t](https://e.com)\n')).toBe('<a href="https://e.com">t</a>');
+  });
+  it('an empty heading emits nothing, not <b></b>', () => {
+    expect(tgHtml('# \n')).toBe('');
+  });
+  it('a table is flattened to " | "-separated rows, not a run-on string', () => {
+    const out = tgHtml('| a | b |\n|---|---|\n| 1 | 2 |\n');
+    expect(out).toContain('a | b');
+    expect(out).toContain('1 | 2');
+    expect(out).not.toContain('ab1'); // header + body no longer fused
   });
 });

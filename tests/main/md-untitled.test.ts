@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -82,6 +82,20 @@ describe('DocumentManager: untitled (new) Markdown document', () => {
     const saved = await readFile(target, 'utf8');
     expect(saved).toContain('# Мой заголовок');
     expect(saved).not.toContain('data-redra'); // markdown, never stamped html
+  });
+
+  it('Save-As over a pre-existing file at the target does NOT raise a false conflict', async () => {
+    // A stale file already sits where the user points Save-As (the OS dialog
+    // already confirmed the overwrite) — the mtime guard must not mis-fire on
+    // an untitled doc's first write.
+    const target = path.join(dir, 'note.md');
+    await writeFile(target, 'old stuff\n');
+    const dm = new DocumentManager(new PerfLog());
+    const { opened } = dm.openUntitled(target, 'Heading'); // placeholder == the existing file
+    opened.journal.push({ type: 'editText', id: 'm0', html: 'Новый' });
+    const res = await dm.save(target);
+    expect(res.ok).toBe(true); // not { conflict: true }
+    expect(await readFile(target, 'utf8')).toContain('# Новый');
   });
 
   it('a saved untitled doc reopens as a normal titled md document', async () => {

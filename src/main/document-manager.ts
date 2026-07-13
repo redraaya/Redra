@@ -347,7 +347,10 @@ export class DocumentManager {
     }
 
     // Conflict guard: someone changed the file since we opened / last saved it.
-    if (overwritesCurrent) {
+    // An untitled doc's first write has no "since we opened" baseline (we never
+    // opened it) — the OS Save dialog already confirmed any overwrite — so the
+    // guard would only mis-fire on a stale file sitting at the placeholder path.
+    if (overwritesCurrent && !cur.isUntitled) {
       const st = await fs.stat(targetPath).catch(() => null);
       if (st && st.mtimeMs !== cur.lastKnownMtimeMs) {
         return { ok: false, conflict: true };

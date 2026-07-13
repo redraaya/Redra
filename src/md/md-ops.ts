@@ -59,6 +59,13 @@ interface Entry {
   removed: boolean;
   /** The gap that PRECEDED this entry at its ORIGINAL position. */
   gapBefore: string;
+  /** A replaceBlock changed this block's TYPE in place (not its position). The
+   *  author's gap was only a valid separator for the OLD type, so the gaps on
+   *  BOTH sides of a type-changed block must be re-validated at serialize time
+   *  exactly like a positional adjacency change — else a lone '\n' that used to
+   *  follow a self-terminating block (heading/hr/list) fuses the neighbours or
+   *  swallows a reference definition once the type becomes a paragraph. */
+  typeChanged: boolean;
 }
 
 function findById(root: P5Parent, id: string): P5Element | null {
@@ -114,6 +121,7 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
     live: null,
     removed: false,
     gapBefore: doc.gaps[i]!,
+    typeChanged: false,
   }));
   const trailingGap = doc.gaps[doc.blocks.length]!;
   // Definitions resolve reference-style links in any re-rendered (edited) block.
@@ -185,6 +193,7 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
           live: null,
           removed: false,
           gapBefore: doc.eol + doc.eol,
+          typeChanged: false,
         });
         break;
       }
@@ -198,6 +207,7 @@ export function applyMdOps(doc: MdDoc, ops: readonly Op[]): Entry[] {
         if (!root) throw new MdOpError(`replaceBlock: no root element in payload for ${op.id}`);
         table[idx]!.live = root;
         table[idx]!.pristine = null;
+        table[idx]!.typeChanged = true; // re-validate gaps on both sides (see Entry)
         break;
       }
       case 'setAttr':
@@ -247,26 +257,31 @@ export function serializeMdSource(doc: MdDoc, ops: readonly Op[], flavor: MdFlav
   let out = '';
   let first = true;
   let lastEmittedRootId: string | null = null;
+  let prevTypeChanged = false;
   const BLANK_LINE = /\r?\n[ \t]*\r?\n/; // a real block separator
   for (const entry of table) {
     if (entry.removed) continue;
     // Gaps are POSITIONAL, and a gap is only a valid separator while the entry
-    // still follows its ORIGINAL predecessor. First surviving entry → the
-    // document head. Otherwise: if the predecessor is UNCHANGED, the author's
+    // still follows its ORIGINAL predecessor AND both neighbours keep their
+    // original type. First surviving entry → the document head. Otherwise: if
+    // the predecessor is UNCHANGED and neither side changed type, the author's
     // own gap is byte-faithful (a lone '\n' after a self-terminating block is
-    // legitimate). If adjacency CHANGED (delete/move/clone), that gap may no
-    // longer separate — keep it only when it already contains a blank line,
-    // else synthesize one (prevents fusing two paragraphs / destroying a link
+    // legitimate). If adjacency CHANGED (delete/move/clone) OR either bordering
+    // block had its TYPE changed (replaceBlock), that gap may no longer
+    // separate — keep it only when it already contains a blank line, else
+    // synthesize one (prevents fusing two paragraphs / destroying a link
     // definition).
+    const adjacencyHeld = entry.origPrevRootId === lastEmittedRootId;
     if (first) {
       out += headGap;
-    } else if (entry.origPrevRootId === lastEmittedRootId) {
+    } else if (adjacencyHeld && !entry.typeChanged && !prevTypeChanged) {
       out += entry.gapBefore;
     } else {
       out += BLANK_LINE.test(entry.gapBefore) ? entry.gapBefore : doc.eol + doc.eol;
     }
     first = false;
     lastEmittedRootId = entry.rootId;
+    prevTypeChanged = entry.typeChanged;
     if (entry.live) {
       out += writeElementMarkdown(entry.live, flavor, doc.eol);
     } else {

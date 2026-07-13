@@ -226,7 +226,11 @@ async function rebuildAppMenu(): Promise<void> {
   const ctx = focusedCtx() ?? (registry.size === 1 ? registry.all()[0]! : null);
   const cur = ctx?.docManager.currentDoc ?? null;
   let versions: VersionMenuItem[] = [];
-  if (cur && backupStore) {
+  // Never surface Version History for an untitled doc: its placeholder path
+  // (e.g. ~/Documents/Untitled.md) can hash to the SAME backup key as a real
+  // file once saved there — restoring one would silently replace the new doc's
+  // content and retarget it to a path the user never chose for this document.
+  if (cur && !cur.isUntitled && backupStore) {
     const entries = await backupStore.list(cur.filePath).catch(() => []);
     const locale = pickLang(app.getLocale()) === 'ru' ? 'ru-RU' : 'en-US';
     const fmt = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
@@ -261,6 +265,9 @@ async function restoreVersion(ctx: WindowContext, v: VersionMenuItem): Promise<v
   const w = ctx.win;
   const dm = ctx.docManager;
   if (!dm.currentDoc || w.isDestroyed()) return;
+  // Belt-and-braces: an untitled doc has no real file, so it has no version
+  // history to restore (the menu already hides it — this guards a stale click).
+  if (dm.currentDoc.isUntitled) return;
   // Captured BEFORE any await: the dialogs below keep the window alive, so
   // the document could in principle change mid-flow (version restore) —
   // document A's backup must never be restored over document B.
@@ -872,7 +879,15 @@ async function newFile(prefer?: WindowContext): Promise<OpenResult> {
     console.error('[new] failed:', message);
     if (SMOKE) app.exit(1);
     else dialog.showErrorBox(t('error.openTitle'), message);
-    if (createdFresh && !ctx.win.isDestroyed() && !ctx.docManager.currentDoc) ctx.win.destroy();
+    // openUntitled sets currentDoc synchronously, so (unlike openDocument) the
+    // doc is already attached when a later loadURL throws — tear it down here.
+    // A freshly-created window has nothing else to show, so destroy it; a reused
+    // free window drops the half-loaded doc and returns to its start screen.
+    if (createdFresh) {
+      if (!ctx.win.isDestroyed()) ctx.win.destroy();
+    } else {
+      ctx.docManager.close();
+    }
     return { ok: false, error: message };
   } finally {
     ctx.opening = false;

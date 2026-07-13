@@ -23,6 +23,7 @@ const escAttr = (t: string): string => esc(t).replace(/"/g, '&quot;');
 
 function safeUrl(url: string): string {
   const s = url.trim();
+  if (/\s/.test(s)) return ''; // a raw space is not a valid destination → drop the link
   return /^(https?:|mailto:|tg:|#|\/|\.)/i.test(s) || !/:/.test(s) ? s : '';
 }
 
@@ -70,8 +71,12 @@ function inlineNode(node: AnyNode): string {
 
 function block(node: AnyNode): string {
   switch (node.type) {
-    case 'heading':
-      return `<b>${inline(node.children)}</b>`;
+    case 'heading': {
+      // An empty heading (e.g. the untitled '# ' starter) must emit nothing,
+      // not an empty <b></b> entity that Telegram would reject.
+      const inner = inline(node.children);
+      return inner ? `<b>${inner}</b>` : '';
+    }
     case 'paragraph':
       return inline(node.children);
     case 'blockquote':
@@ -81,7 +86,10 @@ function block(node: AnyNode): string {
       return (node.children ?? [])
         .map((li) => {
           const marker = node.ordered ? `${n++}. ` : '• ';
-          return marker + (li.children ?? []).map(block).join('\n');
+          // Indent continuation / nested-list lines so a nested list keeps its
+          // hierarchy instead of flattening to the top level.
+          const body = (li.children ?? []).map(block).join('\n');
+          return marker + body.split('\n').join('\n  ');
         })
         .join('\n');
     }
@@ -92,6 +100,12 @@ function block(node: AnyNode): string {
     }
     case 'math':
       return esc(node.value ?? '');
+    case 'table':
+      // Telegram HTML has no tables — flatten to one line per row, cells
+      // separated by ' | ' (else the default case runs every cell together).
+      return (node.children ?? [])
+        .map((row) => (row.children ?? []).map((cell) => inline(cell.children)).join(' | '))
+        .join('\n');
     case 'thematicBreak':
       return '—';
     default:

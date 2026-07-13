@@ -38,6 +38,38 @@ describe('replaceBlock: Markdown block-type change', () => {
   });
 });
 
+// A type change makes the author's single-newline gaps (valid only for the OLD
+// type) unsafe on BOTH sides of the block — the gap must be re-validated like a
+// positional adjacency change, else neighbours fuse / a definition is swallowed.
+describe('replaceBlock: gap re-validation across a single-newline separator', () => {
+  const blocks = (src: string, ops: Op[]): number => parseMarkdownDoc(save(src, ops)).blocks.length;
+
+  it('heading→paragraph does not fuse with the next block', () => {
+    expect(blocks('# H\npara2\n', [{ type: 'replaceBlock', id: 'm0', html: '<p data-redra-id="m0">H</p>' }])).toBe(2);
+  });
+  it('heading→bullet list does not swallow the next paragraph as a lazy line', () => {
+    expect(
+      blocks('# H\npara2\n', [{ type: 'replaceBlock', id: 'm0', html: '<ul data-redra-id="m0"><li>H</li></ul>' }]),
+    ).toBe(2);
+  });
+  it('hr→paragraph does not fuse with the next paragraph', () => {
+    expect(blocks('***\npara2\n', [{ type: 'replaceBlock', id: 'm0', html: '<p data-redra-id="m0">x</p>' }])).toBe(2);
+  });
+  it('the gap BEFORE the changed block is re-validated too (previous paragraph)', () => {
+    expect(blocks('para\n# H\n', [{ type: 'replaceBlock', id: 'm1', html: '<p data-redra-id="m1">H</p>' }])).toBe(2);
+  });
+  it('a reference definition after the changed block survives', () => {
+    const out = save('Intro.\n\n# H\n[ref]: https://example.com/a\n', [
+      { type: 'replaceBlock', id: 'm1', html: '<p data-redra-id="m1">H</p>' },
+    ]);
+    expect(out).toContain('[ref]: https://example.com/a');
+  });
+  it('an already-blank-line gap is kept verbatim (no spurious upgrade)', () => {
+    const out = save('# H\n\npara2\n', [{ type: 'replaceBlock', id: 'm0', html: '<p data-redra-id="m0">H</p>' }]);
+    expect(out).toBe('H\n\npara2\n');
+  });
+});
+
 describe('replaceBlock: guard', () => {
   const doc = parseMarkdownDoc('a\n\nb\n');
   it('accepts a top-level block id', () => {
