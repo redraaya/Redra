@@ -87,6 +87,10 @@ const STRINGS = {
     ru: 'Файл на диске продолжает меняться — сохранение прервано',
     en: 'The file on disk keeps changing — save aborted',
   },
+  'error.commitCapture': {
+    ru: 'Не удалось зафиксировать последние правки — попробуйте сохранить ещё раз',
+    en: 'Couldn’t capture the latest edits — try saving again',
+  },
   'error.unknown': { ru: 'неизвестная ошибка', en: 'unknown error' },
   'error.saveTitle': { ru: 'Не удалось сохранить', en: 'Can’t save' },
   'error.pdfTitle': { ru: 'Не удалось экспортировать PDF', en: 'Can’t export PDF' },

@@ -229,6 +229,12 @@ export interface RedraDocBridge {
   pathForFile(file: File): string;
   /** A rejected push was rolled back — surface main's localized message as a shell toast. */
   notifyRejected(message: string): void;
+  /** MD 2.0: commit the whole <main> innerHTML at a commit point. `gen` is the
+   *  renderer input generation the snapshot captured. Optional so the HTML
+   *  path's bridge stubs stay valid unchanged (absent ⇒ html doc). */
+  commitMdBody?(docId: string, html: string, gen: number): Promise<{ ok: boolean }>;
+  /** MD 2.0: first input of a dirty period — main flips liveDirty/dirtyGen. */
+  mdDirty?(docId: string, gen: number): void;
   /** Undo/redo availability changed — main relays it to this window's shell so
    *  the titlebar undo/redo buttons can enable/disable. */
   emitAvailability(state: EditAvailability): void;

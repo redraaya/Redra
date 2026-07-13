@@ -16,8 +16,11 @@ export interface SaveFlowDeps {
   t: Translate;
   getWin(): BrowserWindow | null;
   getDocView(): WebContentsView | null;
-  /** Flush the doc preload's in-flight edit session into the journal. */
-  commitActiveEdit(): Promise<void>;
+  /** Flush the doc preload's in-flight edit into main (journal op for HTML,
+   *  whole-body commit for md). Resolves TRUE when the view acked in time —
+   *  an md save with unsaved edits must FAIL on a missed ack rather than
+   *  silently write a stale body as success. */
+  commitActiveEdit(): Promise<boolean>;
   /** before-quit was seen: a confirmed close should resume the aborted Cmd+Q. */
   isQuitRequested(): boolean;
   /** Cmd+Q was aborted by "Cancel" — forget it. */
@@ -102,8 +105,8 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
     const effectiveSaveAs = saveAs || cur.isUntitled;
     const prevPath = cur.filePath;
 
-    // An active edit session must land in the journal before serialization.
-    await deps.commitActiveEdit();
+    // An active edit session must land in main before serialization.
+    const commitAcked = await deps.commitActiveEdit();
 
     const win = deps.getWin();
     let asPath: string | undefined;
@@ -120,7 +123,16 @@ export function createSaveFlow(deps: SaveFlowDeps): SaveFlow {
       asPath = result.filePath;
     }
 
-    let saved = await docManager.save(asPath);
+    // MD 2.0: a dirty document whose commit did NOT arrive means mdState holds
+    // a stale (or no) body — writing it would report success while silently
+    // discarding the newest edits. Fail loudly; the generic error branch below
+    // shows the dialog and keeps the window on the close path.
+    let saved: SaveResult;
+    if (cur.format === 'md' && !commitAcked && docManager.isDirty()) {
+      saved = { ok: false, error: deps.t('error.commitCapture') };
+    } else {
+      saved = await docManager.save(asPath);
+    }
 
     // mtime conflict: someone changed the file on disk since open/last save.
     // Loop: the file can change AGAIN between "Overwrite" and the retry —

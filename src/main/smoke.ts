@@ -1,5 +1,6 @@
 import { app } from 'electron';
 import { validateOp } from './lib/validate-op.js';
+import { renderDocumentBody, serializeMdFromBody } from '../md/index.js';
 import type { OpenedDoc } from './document-manager.js';
 import type { PerfLog } from './lib/perf.js';
 
@@ -82,25 +83,46 @@ export class SmokeHarness {
     setTimeout(() => app.exit(0), 100);
   }
 
-  /** SMOKE-mode self-check: validation + journal round-trip on the real doc. */
+  /** SMOKE-mode self-check: the format's real edit round-trip on the real doc. */
   private opsRoundtrip(): void {
     const cur = this.getDoc();
     if (!cur) return;
-    // The self-check op is format-shaped: HTML stamps are "r<n>" and go
-    // through validateOp; Markdown stamps are "m<n>" (validated elsewhere).
-    let op: { type: 'editText'; id: string; html: string };
     if (cur.format === 'md') {
-      op = { type: 'editText', id: 'm0', html: 'smoke' };
-    } else {
-      const checked = validateOp({ type: 'editText', id: 'r1', html: '<b>smoke</b>' }, cur.doc);
-      if (!checked.ok) {
-        console.error('[smoke] ops-roundtrip FAILED: validateOp:', checked.error);
+      // MD 2.0: edits are whole-body commits, not journal ops. Round-trip the
+      // ACTUAL pipeline: served body → body-diff serializer → byte-identical
+      // source, then a mutated body → changed bytes.
+      if (!cur.mdState) {
+        console.error('[smoke] ops-roundtrip FAILED: md doc without mdState');
         app.exit(1);
         return;
       }
-      op = checked.op as typeof op;
+      const body = renderDocumentBody(cur.mdState.mdDoc.blocks);
+      const identical = serializeMdFromBody(cur.mdState.mdDoc, body, cur.mdState.flavor);
+      if (identical !== cur.mdState.mdDoc.source) {
+        console.error('[smoke] ops-roundtrip FAILED: untouched body not byte-identical');
+        app.exit(1);
+        return;
+      }
+      const edited = serializeMdFromBody(
+        cur.mdState.mdDoc,
+        body + '<p>smoke</p>',
+        cur.mdState.flavor,
+      );
+      if (!edited.includes('smoke')) {
+        console.error('[smoke] ops-roundtrip FAILED: edited body lost the edit');
+        app.exit(1);
+        return;
+      }
+      console.log('[smoke] ops-roundtrip OK');
+      return;
     }
-    cur.journal.push(op);
+    const checked = validateOp({ type: 'editText', id: 'r1', html: '<b>smoke</b>' }, cur.doc);
+    if (!checked.ok) {
+      console.error('[smoke] ops-roundtrip FAILED: validateOp:', checked.error);
+      app.exit(1);
+      return;
+    }
+    cur.journal.push(checked.op);
     const dirtyAfterPush = cur.journal.dirty;
     cur.journal.undo();
     if (!dirtyAfterPush || cur.journal.dirty) {

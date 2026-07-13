@@ -13,6 +13,7 @@ import {
   collectDefinitions,
   buildDocShell,
   serializeMdSource,
+  serializeMdFromBody,
   guardMdPush,
   sniffFlavor,
   mdRootOf,
@@ -29,14 +30,53 @@ export interface MdState {
   flavor: MdFlavor;
   /** Minted clone ids active in this document (for guard validation). */
   mintedClones: Set<string>;
+  /**
+   * MD 2.0 whole-document editing: the newest committed <main> innerHTML from
+   * the live view (null until the first commit). The body-diff serializer runs
+   * against it; `mdDoc` stays the OPEN-TIME baseline for the document's whole
+   * life (mirrors how the HTML journal accumulates since open).
+   */
+  liveBody: string | null;
+  /** True from the first input event until a save catches up (see gens). */
+  liveDirty: boolean;
+  /**
+   * Renderer input-generation counters guarding two loss races: `dirtyGen` is
+   * the newest generation the view REPORTED edits for; `bodyGen` is the
+   * generation captured by the newest committed body. A save clears liveDirty
+   * only when bodyGen >= dirtyGen (keystrokes typed while the save was in
+   * flight keep the doc dirty), and a save must FAIL rather than write stale
+   * bytes when a commit could not be captured (dirty but body generation
+   * behind).
+   */
+  dirtyGen: number;
+  bodyGen: number;
 }
+
+const freshState = (mdDoc: MdDoc): MdState => ({
+  mdDoc,
+  flavor: sniffFlavor(mdDoc),
+  mintedClones: new Set(),
+  liveBody: null,
+  liveDirty: false,
+  dirtyGen: 0,
+  bodyGen: 0,
+});
 
 /** Parse .md text → served HTML shell + the state save/guard need. */
 export function parseMd(text: string, title: string): { stampedHtml: string; state: MdState } {
   const mdDoc = parseMarkdownDoc(text);
   const body = renderDocumentBody(mdDoc.blocks);
   const stampedHtml = buildDocShell(title, body, MD_THEME);
-  return { stampedHtml, state: { mdDoc, flavor: sniffFlavor(mdDoc), mintedClones: new Set() } };
+  return { stampedHtml, state: freshState(mdDoc) };
+}
+
+/**
+ * MD 2.0 save text: the body-diff serializer over the newest committed live
+ * body; a document whose view never committed anything is the source itself.
+ */
+export function serializeMdLive(state: MdState): string {
+  if (state.liveBody === null) return state.mdDoc.source;
+  return serializeMdFromBody(state.mdDoc, state.liveBody, state.flavor);
 }
 
 /** The source a new (⌘N) untitled document starts from: a single empty
@@ -65,7 +105,7 @@ export function newUntitledMd(
     `<h1 data-redra-id="m0" data-redra-ph="${escapeHtml(placeholder)}">`,
   );
   const stampedHtml = buildDocShell(title, body, MD_THEME);
-  return { stampedHtml, state: { mdDoc, flavor: sniffFlavor(mdDoc), mintedClones: new Set() } };
+  return { stampedHtml, state: freshState(mdDoc) };
 }
 
 /** Save text (the .md source) for a set of journal ops. */
@@ -74,13 +114,13 @@ export function serializeMd(state: MdState, ops: readonly Op[]): string {
 }
 
 /**
- * "Copy for Telegram": the document's CURRENT content (journal ops applied,
- * re-parsed) rendered as both clipboard flavors — MarkdownV2 (for the classic
- * composer / Bot API) and Telegram HTML parse-mode (Desktop pastes it rich).
+ * "Copy for Telegram": the document's CURRENT content (the committed live
+ * body, serialized and re-parsed) rendered as both clipboard flavors —
+ * MarkdownV2 (for the classic composer / Bot API) and Telegram HTML
+ * parse-mode (Desktop pastes it rich).
  */
-export function telegramFlavors(state: MdState, ops: readonly Op[]): { markdownV2: string; html: string } {
-  const source = serializeMdSource(state.mdDoc, ops, state.flavor);
-  const tree = parseMarkdownDoc(source).tree;
+export function telegramFlavors(state: MdState): { markdownV2: string; html: string } {
+  const tree = parseMarkdownDoc(serializeMdLive(state)).tree;
   return { markdownV2: toMarkdownV2(tree), html: toTelegramHtml(tree) };
 }
 

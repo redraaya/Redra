@@ -77,10 +77,17 @@ ul,ol{margin:0 0 16px;padding-left:26px}
 li{margin-bottom:7px}
 li::marker{color:var(--d-muted)}
 li.md-task{list-style:none;margin-left:-22px}
-li.md-task::before{content:"";display:inline-block;width:15px;height:15px;margin-right:9px;
-  border:1.5px solid var(--d-muted);border-radius:4.5px;vertical-align:-2px}
+li.md-task > input[type=checkbox]{
+  appearance:none;-webkit-appearance:none;width:15px;height:15px;margin:0 9px 0 0;
+  border:1.5px solid var(--d-quote);border-radius:5px;vertical-align:-2.5px;
+  background:var(--d-paper);cursor:pointer;
+}
+li.md-task > input[type=checkbox]:checked{
+  background:var(--d-link);border-color:var(--d-link);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size:12px;background-position:center;background-repeat:no-repeat;
+}
 li.md-task-done{color:var(--d-muted)}
-li.md-task-done::before{background:var(--d-link);border-color:var(--d-link)}
 table{border-collapse:collapse;width:100%;margin:0 0 18px;font-size:14.5px;display:block;overflow-x:auto}
 th{font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:11.5px;letter-spacing:.06em;
   text-transform:uppercase;color:var(--d-muted);font-weight:600;text-align:left;
@@ -94,9 +101,15 @@ img{max-width:100%;height:auto;border-radius:8px;margin:6px 0 22px}
   padding-top:8px;margin-top:20px}
 .md-footnote-label{color:var(--d-link);margin-right:6px}
 [data-redra-readonly]{position:relative}
+/* MD 2.0 whole-document editing: the caret is the only editing chrome. */
+main[contenteditable=true]{outline:none;caret-color:#d9482b}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme=light]) main[contenteditable=true]{caret-color:#ff6b4a}
+}
 @media print{
   body{background:#fff}
   main{max-width:none;padding:0}
   pre,table{overflow:visible}
+  [data-redra-ph]:empty::before{content:none} /* the new-file hint never prints */
 }
 `;

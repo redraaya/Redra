@@ -22,7 +22,7 @@ import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
 import { guardCloneBlock, guardDocPush } from './lib/op-guard.js';
-import { guardMd, renderMdCloneFragment, telegramFlavors } from './format/md-doc.js';
+import { telegramFlavors } from './format/md-doc.js';
 import { OPENABLE_RE, UNTITLED_MD_NAME } from '../shared/doc-types.js';
 import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
 import { getElementById, renderCloneFragment } from '../engine/index.js';
@@ -104,6 +104,9 @@ const BACKUPS_KEEP_PER_FILE = 10;
 const BACKUPS_KEEP_GLOBAL = 100;
 /** "Version History" shows at most this many entries. */
 const VERSION_MENU_MAX = 10;
+/** md:commitBody payload cap — a whole-document innerHTML; 32 MiB is far above
+ * any real .md render while still bounding a hostile renderer. */
+const MD_BODY_CAP = 32 * 1024 * 1024;
 
 let pendingOpenPath: string | null = cliFile ? path.resolve(cliFile) : null;
 /** Set on before-quit so a confirmed close can resume the aborted Cmd+Q. */
@@ -204,7 +207,7 @@ async function copyForTelegram(ctx: WindowContext): Promise<void> {
   await commitActiveEdit(ctx);
   const cur = ctx.docManager.currentDoc;
   if (!cur || cur.format !== 'md' || !cur.mdState) return;
-  const { markdownV2, html } = telegramFlavors(cur.mdState, cur.journal.ops);
+  const { markdownV2, html } = telegramFlavors(cur.mdState);
   clipboard.write({ text: markdownV2, html });
   sendToShell(ctx, 'notice:show', { text: t('notice.copiedTelegram') });
 }
@@ -281,7 +284,9 @@ async function restoreVersion(ctx: WindowContext, v: VersionMenuItem): Promise<v
   const cur = dm.currentDoc;
   if (!cur) return;
   const proceed = await resolveUnsavedBeforeRestore({
-    journalDirty: cur.journal.dirty,
+    // md 2.0 edits never dirty the journal — the liveDirty flag stands in, or
+    // an md session would be silently discarded without the three-button ask.
+    journalDirty: cur.journal.dirty || !!cur.mdState?.liveDirty,
     askUnsavedChanges: () => ctx.saveFlow.askUnsavedChanges(w, path.basename(cur.filePath)),
     save: () => ctx.saveFlow.doSave(false),
   });
@@ -719,32 +724,37 @@ function setPreview(ctx: WindowContext, on: boolean): void {
 
 /**
  * Ask the doc preload to commit any active edit session and wait for the
- * ack (nonce on 'edit:committed'), at most 1000ms — if the view is gone or
- * unresponsive we proceed anyway rather than wedging the save flow.
+ * ack (nonce on 'edit:committed'). Resolves TRUE when the ack arrived, FALSE
+ * on timeout / no view — the md save path must fail loudly on a missed
+ * commit instead of writing a stale body as success (design-review R3).
  *
  * Ordering invariant: doc→main IPC from one WebContents is delivered in
  * send order, so by the time the 'edit:committed' ack arrives, every
- * ops:push the commit produced has already been received and journaled —
- * the ack doubles as an ordering barrier for in-flight ops:push.
+ * ops:push / md:commitBody the commit produced has already been received —
+ * the ack doubles as an ordering barrier.
+ *
+ * Timeout: HTML commits one block (1s is plenty); an md commit serializes
+ * the WHOLE document's innerHTML, so it gets a longer window.
  */
-function commitActiveEdit(ctx: WindowContext): Promise<void> {
+function commitActiveEdit(ctx: WindowContext): Promise<boolean> {
   const wc = ctx.docView?.webContents;
-  if (!wc || wc.isDestroyed()) return Promise.resolve();
+  if (!wc || wc.isDestroyed()) return Promise.resolve(false);
+  const timeoutMs = ctx.docManager.currentDoc?.format === 'md' ? 3000 : 1000;
   const nonce = randomUUID();
-  return new Promise<void>((resolve) => {
-    const done = (): void => {
+  return new Promise<boolean>((resolve) => {
+    const done = (acked: boolean): void => {
       clearTimeout(timer);
       ipcMain.removeListener('edit:committed', onReply);
-      resolve();
+      resolve(acked);
     };
     const onReply = (event: IpcMainEvent, replyNonce: unknown): void => {
       if (!senderMatches(event, wc) || replyNonce !== nonce) return;
-      done();
+      done(true);
     };
     const timer = setTimeout(() => {
       console.warn('[edit] commit ack timed out — proceeding without it');
-      done();
-    }, 1000);
+      done(false);
+    }, timeoutMs);
     ipcMain.on('edit:committed', onReply);
     wc.send('edit:commit', nonce);
   });
@@ -1042,10 +1052,12 @@ function registerIpc(): void {
     if (!ctx) return { ok: false, error: 'bad sender' };
     const cur = ctx.docManager.currentDoc;
     if (!cur) return { ok: false, error: 'no document' };
-    const checked =
-      cur.format === 'md' && cur.mdState
-        ? guardMd(docId, raw, cur.docId, cur.mdState, cur.journal.ops)
-        : guardDocPush(docId, raw, cur.docId, cur.doc, cur.journal.ops);
+    if (cur.format === 'md') {
+      // MD 2.0: markdown edits travel as whole-body commits (md:commitBody),
+      // never as journal ops — a push here is stale or forged.
+      return { ok: false, error: 'md documents do not accept ops', code: 'invalid' };
+    }
+    const checked = guardDocPush(docId, raw, cur.docId, cur.doc, cur.journal.ops);
     if (!checked.ok) {
       console.error('[ops] rejected push:', checked.error);
       // Localized HERE (main owns the locale); the preload only relays it.
@@ -1072,22 +1084,11 @@ function registerIpc(): void {
     if (!ctx) return { ok: false, error: 'bad sender' };
     const cur = ctx.docManager.currentDoc;
     if (!cur) return { ok: false, error: 'no document' };
-    const cloneId = `c${cur.cloneCounter + 1}`;
-    if (cur.format === 'md' && cur.mdState) {
-      // md clone: the docId must match (stale-doc guard) and the target must
-      // be a top-level md block. renderMdCloneFragment validates the id and
-      // renders the SAME source block under the minted clone id; the op is
-      // journaled so save re-materializes the duplicate.
-      const target = typeof targetId === 'string' ? targetId : '';
-      const html = docId === cur.docId ? renderMdCloneFragment(cur.mdState, target, cloneId) : null;
-      if (!html) {
-        return { ok: false, error: 'cannot clone this block', code: 'invalid', userMessage: t('notice.opRejected') };
-      }
-      cur.cloneCounter += 1;
-      cur.journal.push({ type: 'cloneBlock', id: target, cloneId });
-      broadcastDirty(ctx);
-      return { ok: true, cloneId, html };
+    if (cur.format === 'md') {
+      // MD 2.0 has no block handles — duplication is plain text copy-paste.
+      return { ok: false, error: 'md documents do not clone blocks', code: 'invalid' };
     }
+    const cloneId = `c${cur.cloneCounter + 1}`;
     const checked = guardCloneBlock(docId, targetId, cloneId, cur.docId, cur.doc, cur.journal.ops);
     if (!checked.ok) {
       console.error('[ops] rejected cloneBlock:', checked.error);
@@ -1111,6 +1112,39 @@ function registerIpc(): void {
     cur.journal.push(checked.op);
     broadcastDirty(ctx);
     return { ok: true, cloneId, html };
+  });
+  // --- MD 2.0 whole-document editing channels ---------------------------------
+  // The md view edits ONE contenteditable <main>; edits reach main as (a) a
+  // one-shot dirty signal per input generation and (b) full-body commits at
+  // commit points. Both carry the docId baked into the page URL (stale-view
+  // guard: the doc view is reused across navigations) and a monotonically
+  // increasing renderer input generation (loss-race guard: liveDirty clears
+  // on save only when the committed body caught up with every report).
+  ipcMain.handle('md:commitBody', (event, docId: unknown, html: unknown, gen: unknown) => {
+    const ctx = docCtx(event);
+    const cur = ctx?.docManager.currentDoc;
+    if (!ctx || !cur || cur.format !== 'md' || !cur.mdState) return { ok: false };
+    if (typeof docId !== 'string' || docId !== cur.docId) return { ok: false }; // stale view
+    if (typeof html !== 'string' || html.length > MD_BODY_CAP) {
+      // Over-cap: do NOT store — a stale liveBody plus a newer dirtyGen makes
+      // the next save fail loudly instead of silently writing old bytes.
+      console.error('[md] commitBody rejected: bad or oversized payload');
+      return { ok: false };
+    }
+    const g = typeof gen === 'number' && Number.isFinite(gen) ? gen : cur.mdState.dirtyGen;
+    cur.mdState.liveBody = html;
+    cur.mdState.bodyGen = Math.max(cur.mdState.bodyGen, g);
+    return { ok: true };
+  });
+  ipcMain.on('md:dirty', (event, docId: unknown, gen: unknown) => {
+    const ctx = docCtx(event);
+    const cur = ctx?.docManager.currentDoc;
+    if (!ctx || !cur || cur.format !== 'md' || !cur.mdState) return;
+    if (typeof docId !== 'string' || docId !== cur.docId) return; // stale view
+    const g = typeof gen === 'number' && Number.isFinite(gen) ? gen : cur.mdState.dirtyGen + 1;
+    cur.mdState.dirtyGen = Math.max(cur.mdState.dirtyGen, g);
+    cur.mdState.liveDirty = true;
+    broadcastDirty(ctx);
   });
   // A rejected push the preload rolled back: forward main's own localized
   // text to the OWNING window's shell as a transient toast. Length-capped

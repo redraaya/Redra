@@ -10,7 +10,7 @@
 import { ipcRenderer, webUtils } from 'electron';
 import { createEditorController } from './editor/controller.js';
 import type { EditorController } from './editor/controller.js';
-import { normalizeEditedHtml } from '../engine/normalize.js';
+import { createMdEditorController } from './editor/md-controller.js';
 import type {
   CloneBlockResult,
   EditAvailability,
@@ -49,6 +49,11 @@ const bridge: RedraDocBridge = {
   emitAvailability: (state: EditAvailability) => {
     ipcRenderer.send('edit:availability', state);
   },
+  commitMdBody: (id, html, gen) =>
+    ipcRenderer.invoke('md:commitBody', id, html, gen) as Promise<{ ok: boolean }>,
+  mdDirty: (id, gen) => {
+    ipcRenderer.send('md:dirty', id, gen);
+  },
 };
 
 let controller: EditorController | null = null;
@@ -57,12 +62,15 @@ let controller: EditorController | null = null;
 let wantEditing = true;
 
 window.addEventListener('DOMContentLoaded', () => {
-  // The served document declares its format on <html data-redra-format>. For
-  // Markdown the edit-normalizer keeps Telegram-Rich inline tags (tg-spoiler,
-  // ins/del) that the HTML profile would strip — see normalizeEditedHtml.
+  // The served document declares its format on <html data-redra-format>.
+  // MD 2.0: markdown documents are TEXT — one whole-document contenteditable
+  // (md-controller), no per-block sessions/handles/journal ops. HTML keeps
+  // the per-block layer unchanged.
   const format = document.documentElement.getAttribute('data-redra-format') === 'md' ? 'md' : 'html';
-  const normalize = format === 'md' ? (raw: string) => normalizeEditedHtml(raw, 'md') : undefined;
-  controller = createEditorController(window, bridge, normalize, format);
+  controller =
+    format === 'md'
+      ? createMdEditorController(window, bridge, docId)
+      : createEditorController(window, bridge);
   controller.setEditing(wantEditing);
   // Liveness beacon: main's smoke mode fails the run when this never arrives
   // (e.g. the preload died on a bundling error — the editing layer IS the app).

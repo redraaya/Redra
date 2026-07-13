@@ -73,7 +73,8 @@ describe('DocumentManager: untitled (new) Markdown document', () => {
   it('typing into the heading then Save-As writes the edited heading', async () => {
     const dm = new DocumentManager(new PerfLog());
     const { opened } = dm.openUntitled(placeholder(), 'Heading');
-    opened.journal.push({ type: 'editText', id: 'm0', html: 'Мой заголовок' });
+    opened.mdState!.liveBody = '<h1 data-redra-id="m0">Мой заголовок</h1>';
+    opened.mdState!.liveDirty = true;
     expect(dm.isDirty()).toBe(true);
 
     const target = path.join(dir, 'note.md');
@@ -92,7 +93,8 @@ describe('DocumentManager: untitled (new) Markdown document', () => {
     await writeFile(target, 'old stuff\n');
     const dm = new DocumentManager(new PerfLog());
     const { opened } = dm.openUntitled(target, 'Heading'); // placeholder == the existing file
-    opened.journal.push({ type: 'editText', id: 'm0', html: 'Новый' });
+    opened.mdState!.liveBody = '<h1 data-redra-id="m0">Новый</h1>';
+    opened.mdState!.liveDirty = true;
     const res = await dm.save(target);
     expect(res.ok).toBe(true); // not { conflict: true }
     expect(await readFile(target, 'utf8')).toContain('# Новый');
@@ -101,7 +103,8 @@ describe('DocumentManager: untitled (new) Markdown document', () => {
   it('a saved untitled doc reopens as a normal titled md document', async () => {
     const dm = new DocumentManager(new PerfLog());
     const { opened } = dm.openUntitled(placeholder(), 'Heading');
-    opened.journal.push({ type: 'editText', id: 'm0', html: 'Заголовок и текст' });
+    opened.mdState!.liveBody = '<h1 data-redra-id="m0">Заголовок и текст</h1>';
+    opened.mdState!.liveDirty = true;
     const target = path.join(dir, 'note.md');
     await dm.save(target);
 

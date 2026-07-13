@@ -131,7 +131,14 @@ function renderNode(node: AnyNode, s: RenderState): string {
           : node.checked === false
             ? ' class="md-task"'
             : '';
-      return `<li${task} data-redra-id="${id}">${renderListItemChildren(node, s)}</li>`;
+      // A REAL checkbox (contenteditable=false keeps it interactive inside the
+      // whole-document editable and out of the caret's way) — clicking toggles
+      // it natively; the md-controller syncs the li class and marks the edit.
+      const box =
+        node.checked == null
+          ? ''
+          : `<input type="checkbox" contenteditable="false" tabindex="-1"${node.checked ? ' checked' : ''}> `;
+      return `<li${task} data-redra-id="${id}">${box}${renderListItemChildren(node, s)}</li>`;
     }
     case 'code': {
       const id = stampId(s);

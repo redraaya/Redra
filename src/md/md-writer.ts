@@ -286,11 +286,21 @@ function writeListItems(list: P5Element, ctx: Ctx, indent: string): string[] {
     if (!isElement(child) || child.tagName !== 'li') continue;
     const marker = ordered ? `${n}. ` : `${ctx.flavor.bullet} `;
     n++;
-    const task = hasClass(child, 'md-task')
-      ? hasClass(child, 'md-task-done')
+    // Task state: the REAL checkbox input is the source of truth (the live
+    // toggle syncs its `checked` attribute); li classes remain the fallback
+    // for content that lost the input (e.g. a paste kept only the classes).
+    const box = (child.childNodes ?? []).find(
+      (c) => isElement(c) && c.tagName === 'input' && attr(c, 'type') === 'checkbox',
+    );
+    const task = box
+      ? attr(box as P5Element, 'checked') !== undefined
         ? '[x] '
         : '[ ] '
-      : '';
+      : hasClass(child, 'md-task')
+        ? hasClass(child, 'md-task-done')
+          ? '[x] '
+          : '[ ] '
+        : '';
     const contIndent = indent + ' '.repeat(marker.length);
     // A list item is a sequence of BLOCKS: a loose item has real <p> children
     // (the renderer keeps them) and can contain code/quotes/tables/nested

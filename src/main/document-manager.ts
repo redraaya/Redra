@@ -10,7 +10,7 @@ import type { PerfLog } from './lib/perf.js';
 import type { SaveResult } from '../shared/ipc.js';
 import type { DocFormat } from '../shared/doc-types.js';
 import { formatForPath } from '../shared/doc-types.js';
-import { parseMd, serializeMd, newUntitledMd } from './format/md-doc.js';
+import { parseMd, serializeMdLive, newUntitledMd } from './format/md-doc.js';
 import type { MdState } from './format/md-doc.js';
 
 /** Placeholder RedraDoc for md documents: OpenedDoc.doc is HTML-typed and
@@ -107,7 +107,11 @@ export class DocumentManager {
    */
   isDirty(): boolean {
     const cur = this.current;
-    return !!cur && (cur.journal.dirty || cur.restoredFromBackup);
+    if (!cur) return false;
+    // MD 2.0: markdown edits never enter the journal — the view reports
+    // dirtiness via md:dirty into mdState.liveDirty. Missing this here would
+    // silently skip saves and close edited windows without a prompt.
+    return cur.journal.dirty || cur.restoredFromBackup || !!cur.mdState?.liveDirty;
   }
 
   /**
@@ -336,12 +340,20 @@ export class DocumentManager {
     const overwritesCurrent = targetPath === cur.filePath;
     const ops = cur.journal.ops;
 
-    // Save (not Save As) with no ops onto the same file AND a clean journal:
-    // disk already holds originalBytes — skip the write. A dirty journal with
-    // no ops (edit → save → undo-all) means disk holds the EDITED bytes, so
-    // we must fall through and write originalBytes back. Same for a restored
-    // backup: disk holds the PRE-restore bytes until this write happens.
-    if (asPath === undefined && ops.length === 0 && !cur.journal.dirty && !cur.restoredFromBackup) {
+    // Save (not Save As) with no edits onto the same file: disk already holds
+    // originalBytes — skip the write. HTML: no ops AND a clean journal (a
+    // dirty journal with no ops = edit → save → undo-all means disk holds the
+    // EDITED bytes, so we must fall through and write originalBytes back).
+    // MD 2.0: no committed live body and no dirty flag (edits never enter the
+    // journal — keying this on ops would silently skip every md save). A
+    // restored backup always writes: disk holds the PRE-restore bytes.
+    const mdTouched = cur.format === 'md' && !!(cur.mdState?.liveBody !== null || cur.mdState?.liveDirty);
+    const htmlTouched = ops.length > 0 || cur.journal.dirty;
+    if (
+      asPath === undefined &&
+      !(cur.format === 'md' ? mdTouched : htmlTouched) &&
+      !cur.restoredFromBackup
+    ) {
       this.perf.record('save-skipped-noop', performance.now() - t0);
       return { ok: true, path: targetPath, skipped: true };
     }
@@ -377,12 +389,15 @@ export class DocumentManager {
       // Same for BOM files: the BOM (which won at decode, possibly over a
       // lying meta) is not re-emitted, so the meta must tell the truth.
       let bytes: Buffer;
-      if (ops.length === 0) {
+      if (cur.format === 'md' && cur.mdState) {
+        // Markdown 2.0: the body-diff serializer over the committed live body
+        // (source verbatim when nothing was ever committed). utf-8; no
+        // <meta charset> to rewrite (the charset step is HTML-only). NEVER
+        // gate this on the journal — md edits do not create ops, and falling
+        // into the originalBytes branch would silently discard the session.
+        bytes = Buffer.from(serializeMdLive(cur.mdState), 'utf8');
+      } else if (ops.length === 0) {
         bytes = cur.originalBytes;
-      } else if (cur.format === 'md' && cur.mdState) {
-        // Markdown: block-table splice writes utf-8 source; no <meta charset>
-        // to rewrite (the charset step is HTML-only).
-        bytes = Buffer.from(serializeMd(cur.mdState, ops), 'utf8');
       } else {
         let html = serializeSource(cur.doc, ops);
         if (cur.encoding !== 'utf-8' || cur.hadBom) html = ensureUtf8Charset(html);
@@ -401,6 +416,13 @@ export class DocumentManager {
       }
       cur.isUntitled = false; // written to disk now — a real file from here on
       cur.journal.markSaved();
+      if (cur.mdState) {
+        // Keystrokes typed WHILE this save was writing reported a newer
+        // generation than the committed body — they are not in the written
+        // bytes, so the doc must stay dirty (the re-arm race from the design
+        // review). Only a body that caught up with every report clears it.
+        cur.mdState.liveDirty = cur.mdState.dirtyGen > cur.mdState.bodyGen;
+      }
       cur.restoredFromBackup = false; // the restored state is on disk now
       this.perf.record('save', performance.now() - t0, { bytes: bytes.length });
       return { ok: true, path: targetPath };

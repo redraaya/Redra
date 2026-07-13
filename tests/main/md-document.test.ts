@@ -4,6 +4,17 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DocumentManager } from '../../src/main/document-manager.js';
 import { PerfLog } from '../../src/main/lib/perf.js';
+import { renderDocumentBody } from '../../src/md/index.js';
+import type { OpenedDoc } from '../../src/main/document-manager.js';
+
+/** Simulate the MD 2.0 edit flow: the view commits a (mutated) body. */
+function commitBody(opened: OpenedDoc, mutate: (body: string) => string): void {
+  const body = renderDocumentBody(opened.mdState!.mdDoc.blocks);
+  opened.mdState!.liveBody = mutate(body);
+  opened.mdState!.liveDirty = true;
+  opened.mdState!.dirtyGen = 1;
+  opened.mdState!.bodyGen = 1;
+}
 
 /**
  * Stage 3: a .md file opens as a Markdown document (rendered HTML served,
@@ -60,8 +71,8 @@ describe('DocumentManager: Markdown documents', () => {
     const dm = new DocumentManager(new PerfLog());
     const { opened } = await dm.open(file);
 
-    // Edit the first paragraph (m1): replace its inner html.
-    opened.journal.push({ type: 'editText', id: 'm1', html: 'Совсем другой текст.' });
+    // Edit the first paragraph (m1): the view commits a body with new text.
+    commitBody(opened, (b) => b.replace('Первый абзац, который <strong>редактируем</strong>.', 'Совсем другой текст.'));
     const res = await dm.save();
     expect(res.ok).toBe(true);
 
@@ -82,7 +93,7 @@ describe('DocumentManager: Markdown documents', () => {
     await writeFile(file, SRC);
     const dm = new DocumentManager(new PerfLog());
     const { opened } = await dm.open(file);
-    opened.journal.push({ type: 'editText', id: 'm0', html: 'Новый заголовок' });
+    commitBody(opened, (b) => b.replace('>Отчёт<', '>Новый заголовок<'));
     const target = path.join(dir, 'copy.md');
     const res = await dm.save(target);
     expect(res.ok).toBe(true);
@@ -96,8 +107,8 @@ describe('DocumentManager: Markdown documents', () => {
     await writeFile(file, SRC);
     const dm = new DocumentManager(new PerfLog());
     const { opened } = await dm.open(file);
-    // m2 is the list.
-    opened.journal.push({ type: 'deleteBlock', id: 'm2' });
+    // The view deleted the list element (m2) from the body.
+    commitBody(opened, (b) => b.replace(/<ul data-redra-id="m2">.*?<\/ul>/s, ''));
     await dm.save();
     const saved = await readFile(file, 'utf8');
     expect(saved).not.toContain('- пункт один');
