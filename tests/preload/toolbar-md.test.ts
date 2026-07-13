@@ -21,8 +21,9 @@ function makeToolbar(format: 'html' | 'md') {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
   const onAction = vi.fn<(action: ToolbarAction, value?: string) => void>();
-  const toolbar = new SelectionToolbar(document, parent, t, onAction, format);
-  return { toolbar, onAction };
+  const onBlockType = vi.fn();
+  const toolbar = new SelectionToolbar(document, parent, t, onAction, format, onBlockType);
+  return { toolbar, onAction, onBlockType, parent };
 }
 
 beforeEach(() => {
@@ -49,6 +50,7 @@ describe('quick toolbar: per-format button sets', () => {
       t('toolbar.spoiler'),
       t('toolbar.code'),
       t('toolbar.link'),
+      t('panel.more'), // tier-2 "More" opener
     ]);
   });
 
@@ -70,6 +72,55 @@ describe('quick toolbar: per-format button sets', () => {
     expect(active).toContain(t('toolbar.underline'));
     expect(active).toContain(t('toolbar.spoiler'));
     expect(active).not.toContain(t('toolbar.strikethrough'));
+  });
+});
+
+describe('tier-2 "More" panel', () => {
+  const panelOf = (parent: HTMLElement): HTMLElement => parent.querySelector('.fmtpanel')!;
+
+  it('the More button toggles the panel; cells preview the RESULT (no ==syntax==)', () => {
+    const { toolbar, parent } = makeToolbar('md');
+    toolbar.show(RECT, MD_STATE);
+    const panel = panelOf(parent);
+    expect(panel.classList.contains('visible')).toBe(false);
+    const more = Array.from(toolbar.element.querySelectorAll('button')).find((b) => b.getAttribute('title') === t('panel.more'))!;
+    more.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(panel.classList.contains('visible')).toBe(true);
+    // cells render visual previews, never raw markdown syntax
+    expect(panel.textContent).not.toContain('==');
+    expect(panel.textContent).not.toContain('||');
+    expect(panel.querySelector('.prev.h1')).not.toBeNull();
+    expect(panel.querySelector('.prev.code')).not.toBeNull();
+  });
+
+  it('a block cell fires onBlockType and closes the panel', () => {
+    const { toolbar, onBlockType, parent } = makeToolbar('md');
+    toolbar.show(RECT, MD_STATE);
+    const panel = panelOf(parent);
+    const more = Array.from(toolbar.element.querySelectorAll('button')).find((b) => b.getAttribute('title') === t('panel.more'))!;
+    more.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const h1Cell = Array.from(panel.querySelectorAll('button.cell')).find((c) => c.getAttribute('title') === t('panel.h1'))!;
+    h1Cell.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onBlockType).toHaveBeenCalledWith('h1');
+    expect(panel.classList.contains('visible')).toBe(false);
+  });
+
+  it('an inline cell (highlight) fires onAction mark', () => {
+    const { toolbar, onAction, parent } = makeToolbar('md');
+    toolbar.show(RECT, MD_STATE);
+    const panel = panelOf(parent);
+    const more = Array.from(toolbar.element.querySelectorAll('button')).find((b) => b.getAttribute('title') === t('panel.more'))!;
+    more.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const markCell = Array.from(panel.querySelectorAll('button.cell')).find((c) => c.getAttribute('title') === t('panel.highlight'))!;
+    markCell.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onAction).toHaveBeenCalledWith('mark');
+  });
+
+  it('HTML mode has no More button and an empty panel', () => {
+    const { toolbar, parent } = makeToolbar('html');
+    toolbar.show(RECT, { bold: false, italic: false, code: false, link: null });
+    expect(Array.from(toolbar.element.querySelectorAll('button')).some((b) => b.getAttribute('title') === t('panel.more'))).toBe(false);
+    expect(panelOf(parent).querySelectorAll('button.cell').length).toBe(0);
   });
 });
 

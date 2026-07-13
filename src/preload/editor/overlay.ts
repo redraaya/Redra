@@ -2,7 +2,7 @@ import { REDRA_ID_ATTR } from '../../engine/types.js';
 import { makeT, pickLang } from '../../shared/i18n.js';
 import { SelectionToolbar, TOOLBAR_CSS } from './toolbar.js';
 import type { ToolbarAction } from './toolbar.js';
-import type { DocFormat } from '../../shared/doc-types.js';
+import type { DocFormat, BlockKind } from '../../shared/doc-types.js';
 
 /**
  * Floating editor chrome: the block handle pill (⋮⋮ grip + duplicate +
@@ -173,6 +173,8 @@ export interface OverlayCallbacks {
   onImageReplace(): void;
   /** Inline-formatting toolbar button pressed (value = link href). */
   onToolbar(action: ToolbarAction, value?: string): void;
+  /** Tier-2 panel: "Turn into" a block type (Markdown only). */
+  onBlockType(kind: BlockKind): void;
 }
 
 export class Overlay {
@@ -220,6 +222,7 @@ export class Overlay {
       t,
       (action, value) => callbacks.onToolbar(action, value),
       format,
+      (kind) => callbacks.onBlockType(kind),
     );
 
     this.handle = doc.createElement('div');

@@ -4,6 +4,19 @@
  */
 export type DocFormat = 'html' | 'md';
 
+/** Block types the Markdown "Turn into …" panel offers (Stage 6). */
+export type BlockKind =
+  | 'paragraph'
+  | 'h1'
+  | 'h2'
+  | 'h3'
+  | 'ul'
+  | 'ol'
+  | 'task'
+  | 'blockquote'
+  | 'pre'
+  | 'hr';
+
 /** Extensions Redra opens, per format. */
 export const HTML_EXTENSIONS = ['html', 'htm'] as const;
 export const MD_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkd'] as const;

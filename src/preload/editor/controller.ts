@@ -5,7 +5,7 @@ import {
 } from '../../engine/normalize.js';
 import { REDRA_ID_ATTR } from '../../engine/types.js';
 import type { RedraDocBridge } from '../../shared/ipc.js';
-import type { DocFormat } from '../../shared/doc-types.js';
+import type { DocFormat, BlockKind } from '../../shared/doc-types.js';
 import { resolveEditable } from './editable.js';
 import { resolveBlock } from './blocks.js';
 import { beginSession, revertSession, endVisuals, isUndoGroupBoundary } from './session.js';
@@ -26,19 +26,6 @@ import type { ToolbarAction } from './toolbar.js';
  * fire ahead of every page handler and can suppress them
  * (stopImmediatePropagation) while editing is on.
  */
-/** Block types the "Turn into …" panel offers (Markdown, Stage 6). */
-export type BlockKind =
-  | 'paragraph'
-  | 'h1'
-  | 'h2'
-  | 'h3'
-  | 'ul'
-  | 'ol'
-  | 'task'
-  | 'blockquote'
-  | 'pre'
-  | 'hr';
-
 export interface EditorController {
   /** Arm (editing) / disarm (Preview) the layer. Idempotent. */
   setEditing(editing: boolean): void;
@@ -124,6 +111,7 @@ export function createEditorController(
       void replaceImageViaPick(img);
     },
     onToolbar: (action, value) => handleToolbarAction(action, value),
+    onBlockType: (kind) => turnInto(kind),
   }, format);
 
   /** Last selection range shown in the toolbar — restored for link actions
@@ -408,6 +396,15 @@ export function createEditorController(
       case 'spoiler':
         // Telegram spoiler — a bare <tg-spoiler> toggle (same machinery as code).
         toggleInline('tg-spoiler');
+        break;
+      case 'mark':
+        toggleInline('mark');
+        break;
+      case 'sub':
+        toggleInline('sub');
+        break;
+      case 'sup':
+        toggleInline('sup');
         break;
       case 'link':
         if (!value) break;

@@ -16,7 +16,7 @@ import { closestTag } from './format.js';
  * contenteditable; the link input is the one deliberate exception.
  */
 
-import type { DocFormat } from '../../shared/doc-types.js';
+import type { DocFormat, BlockKind } from '../../shared/doc-types.js';
 
 export type ToolbarAction =
   | 'bold'
@@ -24,6 +24,9 @@ export type ToolbarAction =
   | 'underline'
   | 'strike'
   | 'spoiler'
+  | 'mark'
+  | 'sub'
+  | 'sup'
   | 'code'
   | 'link'
   | 'unlink';
@@ -140,6 +143,61 @@ export const TOOLBAR_CSS = `
 @media print {
   .fmtbar { display: none !important; }
 }
+.fmtbar .more { width: auto; padding: 0 8px; gap: 3px; font-size: 12px; }
+
+/* --- tier-2 "More" panel: cells preview the RESULT, not the syntax --------- */
+.fmtpanel {
+  position: fixed;
+  display: none;
+  width: 300px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.99);
+  border: 1px solid rgba(28, 27, 25, 0.10);
+  box-shadow: 0 10px 34px rgba(20, 18, 14, 0.18);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  z-index: 3;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.fmtpanel.visible { display: block; }
+.fmtpanel .plabel {
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: #a09d95; margin: 6px 6px 6px;
+}
+.fmtpanel .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.fmtpanel .cell {
+  all: initial; cursor: pointer; text-align: left;
+  border: 1px solid rgba(28, 27, 25, 0.09); border-radius: 8px;
+  padding: 8px 9px; min-height: 52px;
+  display: flex; flex-direction: column; justify-content: center; gap: 3px;
+  font-family: inherit;
+}
+.fmtpanel .cell:hover { border-color: rgba(28, 27, 25, 0.28); }
+.fmtpanel .cell .prev { color: #1c1b19; line-height: 1.2; font-family: "Iowan Old Style", Palatino, Georgia, serif; }
+.fmtpanel .cell .name { font-size: 10px; color: #8a877f; }
+.fmtpanel .prev.h1 { font-family: -apple-system, sans-serif; font-weight: 700; font-size: 17px; letter-spacing: -.02em; }
+.fmtpanel .prev.h2 { font-family: -apple-system, sans-serif; font-weight: 650; font-size: 15px; letter-spacing: -.015em; }
+.fmtpanel .prev.h3 { font-family: -apple-system, sans-serif; font-weight: 600; font-size: 13px; }
+.fmtpanel .prev.body { font-size: 13px; }
+.fmtpanel .prev.q { border-left: 2.5px solid #d9d5ca; padding-left: 8px; font-size: 12.5px; }
+.fmtpanel .prev.dq .tri { color: #a09d95; font-size: 9px; margin-right: 4px; }
+.fmtpanel .prev.code { font-family: ui-monospace, "SF Mono", monospace; font-size: 11px; background: rgba(28,27,25,.055); border-radius: 4px; padding: 3px 6px; }
+.fmtpanel .prev .m { color: #a09d95; }
+.fmtpanel .prev .mk { background: #f6e7a3; border-radius: 3px; padding: 0 3px; }
+.fmtpanel .prev.hr i { display: block; height: 1px; background: rgba(28,27,25,.2); }
+@media (prefers-color-scheme: dark) {
+  .fmtpanel { background: rgba(35, 34, 32, 0.99); border-color: rgba(236, 234, 230, 0.12); }
+  .fmtpanel .cell { border-color: rgba(236, 234, 230, 0.12); }
+  .fmtpanel .cell:hover { border-color: rgba(236, 234, 230, 0.30); }
+  .fmtpanel .cell .prev { color: #eceae6; }
+  .fmtpanel .cell .name { color: #8f8c84; }
+  .fmtpanel .prev.code { background: rgba(236,234,230,.08); }
+  .fmtpanel .prev .mk { background: #57491f; }
+}
+@media print { .fmtpanel { display: none !important; } }
 `;
 
 const LINK_SVG =
@@ -156,9 +214,10 @@ const UNLINK_SVG =
   '<line x1="8" y1="2" x2="8" y2="5"/><line x1="2" y1="8" x2="5" y2="8"/>' +
   '<line x1="16" y1="19" x2="16" y2="22"/><line x1="19" y1="16" x2="22" y2="16"/></svg>';
 
-/** One quick-toolbar button. `link` is special (opens the URL input). */
+/** One quick-toolbar button. `link` opens the URL input; `more` opens the
+ *  tier-2 panel — both are handled locally, not via onAction. */
 interface ToolButtonDef {
-  id: Exclude<ToolbarAction, 'unlink'>;
+  id: Exclude<ToolbarAction, 'unlink'> | 'more';
   cls: string;
   titleKey: Parameters<Translate>[0];
   glyph: { text?: string; html?: string };
@@ -167,6 +226,44 @@ interface ToolButtonDef {
   /** A hairline separator is drawn BEFORE this button. */
   sepBefore?: boolean;
 }
+
+/** A cell in the tier-2 panel: either a block-type change or an inline format,
+ *  shown as a VISUAL PREVIEW of the result (never the raw ==syntax==). */
+type PanelCell =
+  | { block: BlockKind; nameKey: Parameters<Translate>[0]; preview: string }
+  | { action: 'mark' | 'sub' | 'sup' | 'spoiler'; nameKey: Parameters<Translate>[0]; preview: string };
+
+interface PanelSection {
+  labelKey: Parameters<Translate>[0];
+  cells: readonly PanelCell[];
+}
+
+const PANEL_SECTIONS: readonly PanelSection[] = [
+  {
+    labelKey: 'panel.turnInto',
+    cells: [
+      { block: 'h1', nameKey: 'panel.h1', preview: '<span class="prev h1">Заголовок</span>' },
+      { block: 'h2', nameKey: 'panel.h2', preview: '<span class="prev h2">Заголовок</span>' },
+      { block: 'h3', nameKey: 'panel.h3', preview: '<span class="prev h3">Заголовок</span>' },
+      { block: 'paragraph', nameKey: 'panel.text', preview: '<span class="prev body">Обычный текст</span>' },
+      { block: 'ul', nameKey: 'panel.bullet', preview: '<span class="prev body"><span class="m">•</span> Список</span>' },
+      { block: 'ol', nameKey: 'panel.numbered', preview: '<span class="prev body"><span class="m">1.</span> Список</span>' },
+      { block: 'task', nameKey: 'panel.task', preview: '<span class="prev body"><span class="m">☑</span> Задача</span>' },
+      { block: 'blockquote', nameKey: 'panel.quote', preview: '<span class="prev q">Цитата</span>' },
+      { block: 'pre', nameKey: 'panel.code', preview: '<span class="prev code">const x = 1</span>' },
+      { block: 'hr', nameKey: 'panel.divider', preview: '<span class="prev hr"><i></i></span>' },
+    ],
+  },
+  {
+    labelKey: 'panel.moreFormat',
+    cells: [
+      { action: 'mark', nameKey: 'panel.highlight', preview: '<span class="prev body"><span class="mk">выделение</span></span>' },
+      { action: 'sup', nameKey: 'panel.superscript', preview: '<span class="prev body">x²</span>' },
+      { action: 'sub', nameKey: 'panel.subscript', preview: '<span class="prev body">H₂O</span>' },
+      { action: 'spoiler', nameKey: 'panel.spoiler', preview: '<span class="prev body sp">спойлер</span>' },
+    ],
+  },
+];
 
 const BOTH: ReadonlySet<DocFormat> = new Set<DocFormat>(['html', 'md']);
 const MD_ONLY: ReadonlySet<DocFormat> = new Set<DocFormat>(['md']);
@@ -185,6 +282,7 @@ const TOOL_BUTTONS: readonly ToolButtonDef[] = [
   { id: 'spoiler', cls: 'sp', titleKey: 'toolbar.spoiler', glyph: { text: 'аб' }, formats: MD_ONLY, active: (s) => !!s.spoiler },
   { id: 'code', cls: 'c', titleKey: 'toolbar.code', glyph: { text: '<>' }, formats: BOTH, active: (s) => s.code, sepBefore: true },
   { id: 'link', cls: 'l', titleKey: 'toolbar.link', glyph: { html: LINK_SVG }, formats: BOTH, active: (s) => s.link !== null },
+  { id: 'more', cls: 'more', titleKey: 'panel.more', glyph: { text: 'Ещё ⌄' }, formats: MD_ONLY, active: () => false, sepBefore: true },
 ];
 
 export class SelectionToolbar {
@@ -199,12 +297,15 @@ export class SelectionToolbar {
   };
   private inLinkMode = false;
 
+  private readonly panel: HTMLElement;
+
   constructor(
     doc: Document,
     parent: ParentNode,
     t: Translate,
     private readonly onAction: (action: ToolbarAction, value?: string) => void,
     format: DocFormat = 'html',
+    private readonly onBlockType: (kind: BlockKind) => void = () => {},
   ) {
     this.doc = doc;
     this.bar = doc.createElement('div');
@@ -228,12 +329,22 @@ export class SelectionToolbar {
     };
 
     this.buttons = TOOL_BUTTONS.filter((def) => def.formats.has(format)).map((def) => ({
-      el: makeButton(def.cls, t(def.titleKey), def.glyph, () =>
-        def.id === 'link' ? this.enterLinkMode() : this.onAction(def.id),
-      ),
+      el: makeButton(def.cls, t(def.titleKey), def.glyph, () => {
+        if (def.id === 'link') this.enterLinkMode();
+        else if (def.id === 'more') this.togglePanel();
+        else this.onAction(def.id);
+      }),
       active: def.active,
       sepBefore: def.sepBefore ?? false,
     }));
+
+    // Tier-2 panel (Markdown only): visual-preview cells for block types + rich
+    // inline formats. Built once; opened by the "More" button.
+    this.panel = doc.createElement('div');
+    this.panel.className = 'fmtpanel';
+    this.panel.addEventListener('mousedown', (e) => e.preventDefault()); // no focus steal
+    if (format === 'md') this.buildPanel(t);
+    parent.appendChild(this.panel);
 
     this.linkInput = doc.createElement('input');
     this.linkInput.setAttribute('type', 'text');
@@ -292,7 +403,61 @@ export class SelectionToolbar {
 
   hide(): void {
     this.exitLinkMode();
+    this.hidePanel();
     this.bar.classList.remove('visible');
+  }
+
+  get panelOpen(): boolean {
+    return this.panel.classList.contains('visible');
+  }
+
+  /** Build the tier-2 panel cells once (Markdown only). Preview markup is our
+   *  own static content; the localized name is set as text. */
+  private buildPanel(t: Translate): void {
+    for (const section of PANEL_SECTIONS) {
+      const label = this.doc.createElement('div');
+      label.className = 'plabel';
+      label.textContent = t(section.labelKey);
+      this.panel.appendChild(label);
+      const grid = this.doc.createElement('div');
+      grid.className = 'grid';
+      for (const cell of section.cells) {
+        const btn = this.doc.createElement('button');
+        btn.className = 'cell';
+        btn.setAttribute('title', t(cell.nameKey));
+        btn.innerHTML = cell.preview; // trusted static preview markup
+        const name = this.doc.createElement('span');
+        name.className = 'name';
+        name.textContent = t(cell.nameKey);
+        btn.appendChild(name);
+        btn.addEventListener('mousedown', (e) => e.preventDefault());
+        btn.addEventListener('click', () => {
+          this.hidePanel();
+          if ('block' in cell) this.onBlockType(cell.block);
+          else this.onAction(cell.action);
+        });
+        grid.appendChild(btn);
+      }
+      this.panel.appendChild(grid);
+    }
+  }
+
+  private togglePanel(): void {
+    if (this.panelOpen) {
+      this.hidePanel();
+      return;
+    }
+    this.panel.classList.add('visible');
+    const barRect = this.bar.getBoundingClientRect();
+    const w = this.panel.offsetWidth || 300;
+    const vw = this.doc.documentElement.clientWidth || 800;
+    const left = Math.max(6, Math.min(barRect.left, vw - w - 6));
+    this.panel.style.left = `${left}px`;
+    this.panel.style.top = `${barRect.bottom + 6}px`;
+  }
+
+  private hidePanel(): void {
+    this.panel.classList.remove('visible');
   }
 
   /** Second toolbar state: an inline URL input (prefilled inside an <a>) + unlink. */
