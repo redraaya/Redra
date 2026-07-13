@@ -1,16 +1,39 @@
-# Redra — a visual editor for HTML files
+# Redra — a visual editor for HTML and Markdown files
 
-**Open HTML. Click. Write.**
+**Open a file. Click. Write.**
 
-Redra is a WYSIWYG editor for plain HTML files on macOS. Open any HTML file —
-a report, a presentation, an AI-generated page — and it renders exactly like
-it does in Chrome. Click into the text and type. Drag blocks by their handle,
-delete what you don't need, hit ⌘S — and the **same file** is saved back to
-disk. No code, no broken layout. Or export it to PDF.
+Redra is a WYSIWYG editor for plain HTML and Markdown files on macOS. Open any
+HTML file — a report, a presentation, an AI-generated page — and it renders
+exactly like it does in Chrome. Open a `.md` file and it reads like a finished
+document, not a screen of `#` and `*`. Click into the text and type. Drag
+blocks by their handle, delete what you don't need, hit ⌘S — and the **same
+file** is saved back to disk, its layout (or its Markdown) intact. No code, no
+split-screen preview, no broken formatting. Or export it to PDF.
 
 ![A document in Redra](docs/assets/redra-doc.png)
 
 ![Redra features](docs/assets/features.png)
+
+**New in v0.5.0 — Markdown mode:**
+
+- **Edit Markdown the way you read it.** Open a `.md` file and Redra renders it
+  as a clean document — warm paper, real headings, quiet quotes — then lets you
+  click into it and write. You edit exactly what you see; there is no raw-code
+  pane and no `==syntax==` on screen. On save, only the blocks you touched are
+  re-written — every untouched block and blank line is preserved byte-for-byte.
+- **The full Telegram formatting set, in two tiers.** Select text and a quick
+  toolbar offers bold, italic, underline, strikethrough, spoiler, code and
+  links. Tap **More** for the rest — highlight, super/subscript, headings,
+  lists, checklists, quotes, code blocks — each shown as a **visual preview of
+  the result**, not a cheat-sheet of symbols.
+- **Copy for Telegram (⌥⌘C).** Write a post in Redra and paste it straight into
+  Telegram with formatting intact — the clipboard carries both Telegram's rich
+  HTML and MarkdownV2.
+- **New file (⌘N).** Start a fresh Markdown document; it becomes a real file on
+  your first ⌘S. (A new empty window moved to ⌘⇧N.)
+- **It matches your file's style.** Redra sniffs how an opened file already
+  writes bold, lists, headings and the like, and keeps new edits in that same
+  dialect — a new file uses clean, GitHub-compatible defaults.
 
 **New in v0.4.1:**
 
@@ -114,14 +137,18 @@ Once installed, Redra shows up in Finder's "Open With…" menu for `.html` and
 | Shortcut | Action |
 | --- | --- |
 | ⌘O | Open a file |
-| ⌘N | New window |
+| ⌘N | New Markdown file |
+| ⇧⌘N | New window |
 | ⌘F | Find in the document |
 | ⌘S | Save |
 | ⇧⌘S | Save As… |
 | ⌘E | Preview mode (toggles editing on/off) |
 | ⇧⌘E | Export to PDF… |
-| ⌘Z | Undo |
-| ⇧⌘Z | Redo |
+| ⌘Z / ⇧⌘Z | Undo / Redo |
+| ⌘B / ⌘I | Bold / Italic |
+| ⌘U / ⇧⌘X | Underline / Strikethrough *(Markdown)* |
+| ⇧⌘M / ⇧⌘P | Code / Spoiler *(spoiler is Markdown)* |
+| ⌥⌘C | Copy for Telegram *(Markdown)* |
 | Esc | Revert the element being edited (back to how it was) or cancel a drag |
 | ⌘-click a link | Open the link in your browser |
 
@@ -135,6 +162,17 @@ Once installed, Redra shows up in Finder's "Open With…" menu for `.html` and
 - One window — one document (open as many windows as you like); relative
   links to sibling `.html` files are deliberately dead inside the document
   view.
+
+Markdown mode (v0.5), specifically:
+
+- **Byte-fidelity is per top-level block.** Untouched blocks and the blank
+  lines between them are preserved exactly; editing *inside* a block (a list, a
+  table) canonicalizes just that one block, in your file's detected style.
+- **Enter inside a block is a line break**; a brand-new paragraph is
+  materialized when you save.
+- **Image replacement is off in Markdown** (embedding base64 would fight the
+  format), and Mermaid / custom emoji / Telegram-specific extras aren't
+  rendered yet.
 
 ## Build from source
 
