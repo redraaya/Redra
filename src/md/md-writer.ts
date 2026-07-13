@@ -257,7 +257,10 @@ function writeParagraphLines(el: P5Element, ctx: Ctx): string {
         .join(''),
     )
     .map((text) =>
+      // Normalize every internal newline (soft breaks carried in text content)
+      // to the document's EOL first, so a CRLF file never gets a lone LF.
       text
+        .replace(/\r\n|\r|\n/g, ctx.eol)
         .split(ctx.eol)
         .map((line) => escapeLineStart(line))
         .join(ctx.eol)

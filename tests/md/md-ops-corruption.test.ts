@@ -197,6 +197,20 @@ describe('re-review: block children of a list item are not destroyed', () => {
   });
 });
 
+describe('final gate: CRLF documents never get a lone LF written back', () => {
+  it('editing a paragraph with a soft break keeps the document EOL (\\r\\n)', () => {
+    const src = 'a\r\nb\r\n';
+    const doc = parseMarkdownDoc(src);
+    const inner = /^<p[^>]*>([\s\S]*)<\/p>$/.exec(renderBlockHtml(doc.blocks[0]!))![1]!;
+    const out = serializeMdSource(doc, [{ type: 'editText', id: 'm0', html: inner }], RICH_DEFAULTS);
+    expect(/[^\r]\n/.test(out)).toBe(false); // no lone LF
+  });
+  it('a CRLF file with no ops is byte-identical', () => {
+    const src = '# H\r\n\r\npara\r\n\r\n- a\r\n- b\r\n';
+    expect(save(src, [])).toBe(src);
+  });
+});
+
 describe('final gate: the mainline inline writer never writes an unsafe URL to the file', () => {
   const cases: Array<[string, string, string]> = [
     ['paragraph link', 'hello\n', '<a href="javascript:alert(1)">click</a>'],
