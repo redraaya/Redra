@@ -439,6 +439,13 @@ function writeBlockElement(el: P5Element, ctx: Ctx): string {
         // gets the island's CONTENT, never the wrapper div itself.
         return (el.childNodes ?? []).map(islandHtml).join('');
       }
+      if (tag === 'div') {
+        // A BARE div is Chromium editing chrome (whole-document contenteditable
+        // splits/pastes can mint them), never our render vocabulary — write it
+        // as a paragraph so inline formatting survives and raw HTML never
+        // enters the file through this path.
+        return writeParagraphLines(el, ctx);
+      }
       // Islands rooted directly (details) : HTML verbatim minus stamps.
       return islandHtml(el);
     case 'img':
