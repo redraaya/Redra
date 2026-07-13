@@ -134,6 +134,12 @@ export interface DirtyState {
   canSave: boolean;
 }
 
+/** Inline formats the Format menu (keyboard shortcuts) toggles over the current
+ *  selection — a subset of the toolbar's actions that need no extra input. Sent
+ *  main → doc view as 'edit:format' and applied through the same pipeline as a
+ *  toolbar click. */
+export type FormatCommand = 'bold' | 'italic' | 'underline' | 'strike' | 'code' | 'spoiler';
+
 export interface ModeState {
   /** True when the live editing layer is armed (default); false = Preview. */
   editing: boolean;

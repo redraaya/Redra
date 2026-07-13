@@ -39,6 +39,7 @@ import { ContextRegistry, WindowContext, chooseOpenTarget, isFreeForOpen } from 
 import type {
   CloneBlockResult,
   ExportResult,
+  FormatCommand,
   ImageValueResult,
   OpPushResult,
   OpUndoResult,
@@ -186,6 +187,11 @@ const menuHandlers = {
   copyTelegram: () => {
     const ctx = focusedCtx();
     if (ctx) void copyForTelegram(ctx);
+  },
+  format: (cmd: FormatCommand) => {
+    // Route to the focused window's doc view; it applies the toggle to the live
+    // selection through the same pipeline the toolbar uses (no-op without one).
+    focusedCtx()?.docView?.webContents.send('edit:format', cmd);
   },
 };
 

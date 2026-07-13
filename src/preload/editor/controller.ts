@@ -37,6 +37,9 @@ export interface EditorController {
   handleRedo(): void;
   /** Change the target block's type (Markdown "Turn into …"). No-op for HTML. */
   turnInto(kind: BlockKind): void;
+  /** Toggle an inline format over the current selection (Format-menu shortcut,
+   *  e.g. ⌘B). Same pipeline as a toolbar click; no-ops without a live session. */
+  applyFormat(action: ToolbarAction): void;
   /** Show the titlebar tooltip over the document (the shell drives hover; the
    *  doc view draws it so it clears this view, which composites over the shell
    *  strip). x,y are in this view's coordinates. */
@@ -1071,6 +1074,13 @@ export function createEditorController(
     turnInto(kind: BlockKind): void {
       if (destroyed) return;
       turnInto(kind);
+    },
+    applyFormat(action: ToolbarAction): void {
+      // handleToolbarAction already no-ops without a session / with a collapsed
+      // selection for the wrap toggles, so a menu shortcut fired at the wrong
+      // moment is harmless.
+      if (destroyed) return;
+      handleToolbarAction(action);
     },
     showTip(text: string, x: number, y: number): void {
       if (destroyed) return;

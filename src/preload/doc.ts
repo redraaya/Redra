@@ -14,6 +14,7 @@ import { normalizeEditedHtml } from '../engine/normalize.js';
 import type {
   CloneBlockResult,
   EditAvailability,
+  FormatCommand,
   ImageValueResult,
   ModeState,
   OpPushResult,
@@ -75,6 +76,7 @@ ipcRenderer.on('mode:set', (_event, state: ModeState) => {
 
 ipcRenderer.on('edit:undo', () => controller?.handleUndo());
 ipcRenderer.on('edit:redo', () => controller?.handleRedo());
+ipcRenderer.on('edit:format', (_event, cmd: FormatCommand) => controller?.applyFormat(cmd));
 
 // Titlebar tooltip: the shell detected the hover and converted the icon's
 // position into this view's coordinates; we just draw it (over the document).

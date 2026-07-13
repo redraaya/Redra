@@ -49,6 +49,7 @@ const STRINGS = {
   'notice.copiedTelegram': { ru: 'Скопировано для Telegram', en: 'Copied for Telegram' },
   'menu.paste': { ru: 'Вставить', en: 'Paste' },
   'menu.selectAll': { ru: 'Выделить всё', en: 'Select All' },
+  'menu.format': { ru: 'Формат', en: 'Format' },
   'menu.view': { ru: 'Вид', en: 'View' },
   'menu.preview': { ru: 'Просмотр', en: 'Preview' },
   'menu.window': { ru: 'Окно', en: 'Window' },

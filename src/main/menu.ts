@@ -1,6 +1,7 @@
 import { Menu } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import type { Translate } from '../shared/i18n.js';
+import type { FormatCommand } from '../shared/ipc.js';
 
 export interface MenuHandlers {
   /** ⌘N — a new untitled Markdown document (created in a free/new window). */
@@ -28,6 +29,8 @@ export interface MenuHandlers {
   /** ⌥⌘C — copy the current Markdown document to the clipboard in Telegram's
    *  MarkdownV2 + HTML flavors (Markdown documents only). */
   copyTelegram(): void;
+  /** Format-menu shortcut (⌘B/⌘I/…): toggle an inline format on the selection. */
+  format(cmd: FormatCommand): void;
 }
 
 /** One entry of the "Version History" submenu (built by main from BackupStore.list). */
@@ -176,6 +179,60 @@ export function buildAppMenu(handlers: MenuHandlers, options: MenuOptions): void
         accelerator: 'CmdOrCtrl+F',
         enabled: docOpen,
         click: () => handlers.find(),
+      },
+    ],
+  });
+
+  // Format: inline toggles routed to the focused doc view (same pipeline as the
+  // selection toolbar). Bold/Italic/Code apply to both formats; underline /
+  // strikethrough / spoiler are Markdown-only (the HTML toolbar has no such
+  // buttons), so they enable only for md documents.
+  const mdOnly = docOpen && (options.isMarkdown ?? false);
+  template.push({
+    label: t('menu.format'),
+    submenu: [
+      {
+        id: 'format-bold',
+        label: t('toolbar.bold'),
+        accelerator: 'CmdOrCtrl+B',
+        enabled: docOpen,
+        click: () => handlers.format('bold'),
+      },
+      {
+        id: 'format-italic',
+        label: t('toolbar.italic'),
+        accelerator: 'CmdOrCtrl+I',
+        enabled: docOpen,
+        click: () => handlers.format('italic'),
+      },
+      {
+        id: 'format-code',
+        label: t('toolbar.code'),
+        accelerator: 'CmdOrCtrl+Shift+M',
+        enabled: docOpen,
+        click: () => handlers.format('code'),
+      },
+      { type: 'separator' },
+      {
+        id: 'format-underline',
+        label: t('toolbar.underline'),
+        accelerator: 'CmdOrCtrl+U',
+        enabled: mdOnly,
+        click: () => handlers.format('underline'),
+      },
+      {
+        id: 'format-strike',
+        label: t('toolbar.strikethrough'),
+        accelerator: 'CmdOrCtrl+Shift+X',
+        enabled: mdOnly,
+        click: () => handlers.format('strike'),
+      },
+      {
+        id: 'format-spoiler',
+        label: t('toolbar.spoiler'),
+        accelerator: 'CmdOrCtrl+Shift+P',
+        enabled: mdOnly,
+        click: () => handlers.format('spoiler'),
       },
     ],
   });
