@@ -68,6 +68,10 @@ export interface ToolbarState {
   underline?: boolean;
   strike?: boolean;
   spoiler?: boolean;
+  /** Tag of the block the caret sits in ('h1', 'p', 'pre', …) — md row 2. */
+  blockTag?: string;
+  /** List membership of the caret's item — md row 2 ('task' = md-task li). */
+  listKind?: 'ul' | 'ol' | 'task';
 }
 
 export interface RectLike {
@@ -144,14 +148,19 @@ export const TOOLBAR_CSS = `
   .fmtbar { display: none !important; }
 }
 .fmtbar .more { width: auto; padding: 0 8px; gap: 3px; font-size: 12px; }
+/* MD two-row layout: row 1 = inline formats, row 2 = block types. */
+.fmtbar.rows { flex-direction: column; align-items: stretch; padding: 0; }
+.fmtbar.rows .frow { display: flex; align-items: center; gap: 2px; padding: 3px; }
+.fmtbar.rows .frow + .frow { border-top: 1px solid rgba(28, 27, 25, 0.08); }
+@media (prefers-color-scheme: dark) { .fmtbar.rows .frow + .frow { border-top-color: rgba(236, 234, 230, 0.12); } }
+.fmtbar button.bk { width: auto; min-width: 26px; padding: 0 6px; font-size: 11px; font-weight: 650; }
+.fmtbar button.bq { font-family: Georgia, serif; font-size: 15px; }
 
 /* --- tier-2 "More" panel: cells preview the RESULT, not the syntax --------- */
 .fmtpanel {
   position: fixed;
   display: none;
-  width: 300px;
-  max-height: 60vh;
-  overflow-y: auto;
+  width: max-content;
   padding: 8px;
   border-radius: 11px;
   background: rgba(255, 255, 255, 0.99);
@@ -167,7 +176,7 @@ export const TOOLBAR_CSS = `
   font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
   color: #a09d95; margin: 6px 6px 6px;
 }
-.fmtpanel .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.fmtpanel .grid { display: grid; grid-template-columns: repeat(3, minmax(96px, 1fr)); gap: 6px; }
 .fmtpanel .cell {
   all: initial; cursor: pointer; text-align: left;
   border: 1px solid rgba(28, 27, 25, 0.09); border-radius: 8px;
@@ -217,7 +226,7 @@ const UNLINK_SVG =
 /** One quick-toolbar button. `link` opens the URL input; `more` opens the
  *  tier-2 panel — both are handled locally, not via onAction. */
 interface ToolButtonDef {
-  id: Exclude<ToolbarAction, 'unlink'> | 'more';
+  id: Exclude<ToolbarAction, 'unlink'> | 'more' | BlockKind;
   cls: string;
   titleKey: Parameters<Translate>[0];
   glyph: { text?: string; html?: string };
@@ -225,7 +234,14 @@ interface ToolButtonDef {
   active: (s: ToolbarState) => boolean;
   /** A hairline separator is drawn BEFORE this button. */
   sepBefore?: boolean;
+  /** md two-row layout: 2 = the block-type row (default 1 = inline row). */
+  row?: 1 | 2;
 }
+
+/** Button ids that dispatch through onBlockType (they ARE BlockKind values). */
+const BLOCK_KIND_IDS: ReadonlySet<string> = new Set<BlockKind>([
+  'paragraph', 'h1', 'h2', 'h3', 'ul', 'ol', 'task', 'blockquote', 'pre', 'hr',
+]);
 
 /** A cell in the tier-2 panel: either a block-type change or an inline format,
  *  shown as a VISUAL PREVIEW of the result (never the raw ==syntax==). */
@@ -239,28 +255,14 @@ interface PanelSection {
 }
 
 const PANEL_SECTIONS: readonly PanelSection[] = [
-  {
-    labelKey: 'panel.turnInto',
-    cells: [
-      { block: 'h1', nameKey: 'panel.h1', preview: '<span class="prev h1">Заголовок</span>' },
-      { block: 'h2', nameKey: 'panel.h2', preview: '<span class="prev h2">Заголовок</span>' },
-      { block: 'h3', nameKey: 'panel.h3', preview: '<span class="prev h3">Заголовок</span>' },
-      { block: 'paragraph', nameKey: 'panel.text', preview: '<span class="prev body">Обычный текст</span>' },
-      { block: 'ul', nameKey: 'panel.bullet', preview: '<span class="prev body"><span class="m">•</span> Список</span>' },
-      { block: 'ol', nameKey: 'panel.numbered', preview: '<span class="prev body"><span class="m">1.</span> Список</span>' },
-      { block: 'task', nameKey: 'panel.task', preview: '<span class="prev body"><span class="m">☑</span> Задача</span>' },
-      { block: 'blockquote', nameKey: 'panel.quote', preview: '<span class="prev q">Цитата</span>' },
-      { block: 'pre', nameKey: 'panel.code', preview: '<span class="prev code">const x = 1</span>' },
-      { block: 'hr', nameKey: 'panel.divider', preview: '<span class="prev hr"><i></i></span>' },
-    ],
-  },
+  // Block types live on the toolbar's second ROW now — the panel keeps only
+  // the rare rich-inline extras, one short strip, never a scrollbar.
   {
     labelKey: 'panel.moreFormat',
     cells: [
       { action: 'mark', nameKey: 'panel.highlight', preview: '<span class="prev body"><span class="mk">выделение</span></span>' },
       { action: 'sup', nameKey: 'panel.superscript', preview: '<span class="prev body">x²</span>' },
       { action: 'sub', nameKey: 'panel.subscript', preview: '<span class="prev body">H₂O</span>' },
-      { action: 'spoiler', nameKey: 'panel.spoiler', preview: '<span class="prev body sp">спойлер</span>' },
     ],
   },
 ];
@@ -282,13 +284,23 @@ const TOOL_BUTTONS: readonly ToolButtonDef[] = [
   { id: 'spoiler', cls: 'sp', titleKey: 'toolbar.spoiler', glyph: { text: 'аб' }, formats: MD_ONLY, active: (s) => !!s.spoiler },
   { id: 'code', cls: 'c', titleKey: 'toolbar.code', glyph: { text: '<>' }, formats: BOTH, active: (s) => s.code, sepBefore: true },
   { id: 'link', cls: 'l', titleKey: 'toolbar.link', glyph: { html: LINK_SVG }, formats: BOTH, active: (s) => s.link !== null },
-  { id: 'more', cls: 'more', titleKey: 'panel.more', glyph: { text: 'Ещё ⌄' }, formats: MD_ONLY, active: () => false, sepBefore: true },
+  // --- md row 2: block types, available IMMEDIATELY (no panel dive) ---------
+  { id: 'h1', cls: 'bk', titleKey: 'panel.h1', glyph: { text: 'H1' }, formats: MD_ONLY, active: (s) => s.blockTag === 'h1', row: 2 },
+  { id: 'h2', cls: 'bk', titleKey: 'panel.h2', glyph: { text: 'H2' }, formats: MD_ONLY, active: (s) => s.blockTag === 'h2', row: 2 },
+  { id: 'h3', cls: 'bk', titleKey: 'panel.h3', glyph: { text: 'H3' }, formats: MD_ONLY, active: (s) => s.blockTag === 'h3', row: 2 },
+  { id: 'ul', cls: 'bk', titleKey: 'panel.bullet', glyph: { text: '•' }, formats: MD_ONLY, active: (s) => s.listKind === 'ul', sepBefore: true, row: 2 },
+  { id: 'ol', cls: 'bk', titleKey: 'panel.numbered', glyph: { text: '1.' }, formats: MD_ONLY, active: (s) => s.listKind === 'ol', row: 2 },
+  { id: 'task', cls: 'bk', titleKey: 'panel.task', glyph: { text: '☑' }, formats: MD_ONLY, active: (s) => s.listKind === 'task', row: 2 },
+  { id: 'blockquote', cls: 'bq', titleKey: 'panel.quote', glyph: { text: '❝' }, formats: MD_ONLY, active: (s) => s.blockTag === 'blockquote', sepBefore: true, row: 2 },
+  { id: 'pre', cls: 'bk c', titleKey: 'panel.code', glyph: { text: '{ }' }, formats: MD_ONLY, active: (s) => s.blockTag === 'pre', row: 2 },
+  { id: 'hr', cls: 'bk', titleKey: 'panel.divider', glyph: { text: '—' }, formats: MD_ONLY, active: () => false, row: 2 },
+  { id: 'more', cls: 'more', titleKey: 'panel.more', glyph: { text: 'Ещё ⌄' }, formats: MD_ONLY, active: () => false, sepBefore: true, row: 2 },
 ];
 
 export class SelectionToolbar {
   private readonly bar: HTMLElement;
   /** Rendered buttons for THIS format, with their active-state predicate. */
-  private readonly buttons: Array<{ el: HTMLButtonElement; active: (s: ToolbarState) => boolean; sepBefore: boolean }>;
+  private readonly buttons: Array<{ el: HTMLButtonElement; active: (s: ToolbarState) => boolean; sepBefore: boolean; row: number }>;
   private readonly linkInput: HTMLInputElement;
   private readonly unlinkBtn: HTMLButtonElement;
   private readonly doc: Document;
@@ -332,10 +344,12 @@ export class SelectionToolbar {
       el: makeButton(def.cls, t(def.titleKey), def.glyph, () => {
         if (def.id === 'link') this.enterLinkMode();
         else if (def.id === 'more') this.togglePanel();
-        else this.onAction(def.id);
+        else if (BLOCK_KIND_IDS.has(def.id)) this.onBlockType(def.id as BlockKind);
+        else this.onAction(def.id as ToolbarAction);
       }),
       active: def.active,
       sepBefore: def.sepBefore ?? false,
+      row: def.row ?? 1,
     }));
 
     // Tier-2 panel (Markdown only): visual-preview cells for block types + rich
@@ -465,6 +479,7 @@ export class SelectionToolbar {
     if (this.inLinkMode) return;
     this.inLinkMode = true;
     this.bar.textContent = '';
+    this.bar.classList.remove('rows'); // the URL input is a single-row state
     this.linkInput.value = this.state.link ?? '';
     this.bar.appendChild(this.linkInput);
     if (this.state.link !== null) this.bar.appendChild(this.unlinkBtn);
@@ -480,14 +495,29 @@ export class SelectionToolbar {
 
   private renderButtons(): void {
     this.bar.textContent = '';
+    const twoRows = this.buttons.some((b) => b.row === 2);
+    this.bar.classList.toggle('rows', twoRows);
+    const rowHost = new Map<number, HTMLElement>();
+    const hostFor = (row: number): HTMLElement => {
+      if (!twoRows) return this.bar;
+      let host = rowHost.get(row);
+      if (!host) {
+        host = this.doc.createElement('div');
+        host.className = 'frow';
+        rowHost.set(row, host);
+        this.bar.appendChild(host);
+      }
+      return host;
+    };
     for (const btn of this.buttons) {
+      const host = hostFor(btn.row);
       if (btn.sepBefore) {
         const sep = this.doc.createElement('span');
         sep.className = 'sep';
-        this.bar.appendChild(sep);
+        host.appendChild(sep);
       }
       btn.el.classList.toggle('active', btn.active(this.state));
-      this.bar.appendChild(btn.el);
+      host.appendChild(btn.el);
     }
   }
 }
@@ -531,6 +561,17 @@ export function selectionContext(
   };
   const anc = range.commonAncestorContainer;
   const linkEl = closestTag(anc, 'a', sessionEl);
+  // Row-2 context (md): the block the caret sits in + list membership.
+  const ancEl = anc.nodeType === 1 ? (anc as Element) : anc.parentElement;
+  const blockEl = ancEl?.closest('h1,h2,h3,h4,h5,h6,p,pre,blockquote') ?? null;
+  const blockTag = blockEl && sessionEl.contains(blockEl) ? blockEl.tagName.toLowerCase() : undefined;
+  const li = ancEl?.closest('li') ?? null;
+  const listEl = li && sessionEl.contains(li) ? li.closest('ul,ol') : null;
+  const listKind: 'ul' | 'ol' | 'task' | undefined = listEl
+    ? li!.classList.contains('md-task')
+      ? 'task'
+      : (listEl.tagName.toLowerCase() as 'ul' | 'ol')
+    : undefined;
   return {
     rect,
     range,
@@ -547,6 +588,8 @@ export function selectionContext(
       spoiler: closestTag(anc, 'tg-spoiler', sessionEl) !== null,
       code: closestTag(anc, 'code', sessionEl) !== null,
       link: linkEl ? linkEl.getAttribute('href') : null,
+      blockTag,
+      listKind,
     },
   };
 }

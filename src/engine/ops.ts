@@ -171,7 +171,6 @@ export type CloneBlockOp = { type: 'cloneBlock'; id: string; cloneId: string };
  * has no writer that could serialize an arbitrary re-typed element back safely),
  * pinned by tests. For Markdown the writer serializes the new element to source.
  */
-export type ReplaceBlockOp = { type: 'replaceBlock'; id: string; html: string };
 
 /** A recorded edit. Plain JSON data — safe to send over IPC and persist. */
 export type Op =
@@ -179,8 +178,7 @@ export type Op =
   | DeleteBlockOp
   | MoveBlockOp
   | SetAttrOp
-  | CloneBlockOp
-  | ReplaceBlockOp;
+  | CloneBlockOp;
 
 /** The only cloneId shape applyOps accepts — disjoint from parseDocument's "rN". */
 const CLONE_ID_RE = /^c\d+$/;
@@ -421,10 +419,6 @@ export function applyOps(doc: RedraDoc, ops: readonly Op[]): void {
         walkElements(copy, register);
         break;
       }
-      case 'replaceBlock':
-        // Markdown-only op — must never touch an HTML document (the journal is
-        // per-format, so this is a defensive guarantee, pinned by tests).
-        throw new RedraOpError(op, 'replaceBlock is not supported for HTML documents');
     }
   }
 }

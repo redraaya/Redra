@@ -38,11 +38,15 @@ describe('quick toolbar: per-format button sets', () => {
     expect(titles).toEqual([t('toolbar.bold'), t('toolbar.italic'), t('toolbar.code'), t('toolbar.link')]);
   });
 
-  it('MD mode adds underline, strikethrough, spoiler', () => {
+  it('MD mode: two rows — inline set on row 1, block types on row 2', () => {
     const { toolbar } = makeToolbar('md');
     toolbar.show(RECT, MD_STATE);
-    const titles = Array.from(toolbar.element.querySelectorAll('button')).map((b) => b.getAttribute('title'));
-    expect(titles).toEqual([
+    expect(toolbar.element.classList.contains('rows')).toBe(true);
+    const rows = toolbar.element.querySelectorAll('.frow');
+    expect(rows.length).toBe(2);
+    const titlesOf = (row: Element): (string | null)[] =>
+      Array.from(row.querySelectorAll('button')).map((b) => b.getAttribute('title'));
+    expect(titlesOf(rows[0]!)).toEqual([
       t('toolbar.bold'),
       t('toolbar.italic'),
       t('toolbar.underline'),
@@ -50,8 +54,39 @@ describe('quick toolbar: per-format button sets', () => {
       t('toolbar.spoiler'),
       t('toolbar.code'),
       t('toolbar.link'),
-      t('panel.more'), // tier-2 "More" opener
     ]);
+    expect(titlesOf(rows[1]!)).toEqual([
+      t('panel.h1'),
+      t('panel.h2'),
+      t('panel.h3'),
+      t('panel.bullet'),
+      t('panel.numbered'),
+      t('panel.task'),
+      t('panel.quote'),
+      t('panel.code'),
+      t('panel.divider'),
+      t('panel.more'), // tier-2 "More" opener (rich-inline extras only)
+    ]);
+  });
+
+  it('row-2 block buttons fire onBlockType directly (no panel dive)', () => {
+    const { toolbar, onBlockType } = makeToolbar('md');
+    toolbar.show(RECT, MD_STATE);
+    const byTitle = (title: string): HTMLButtonElement =>
+      Array.from(toolbar.element.querySelectorAll('button')).find((b) => b.getAttribute('title') === title)!;
+    byTitle(t('panel.h1')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    byTitle(t('panel.numbered')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    byTitle(t('panel.task')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onBlockType.mock.calls.map((c) => c[0])).toEqual(['h1', 'ol', 'task']);
+  });
+
+  it('row-2 active states follow the caret block (blockTag/listKind)', () => {
+    const { toolbar } = makeToolbar('md');
+    toolbar.show(RECT, { ...MD_STATE, blockTag: 'h2', listKind: 'task' });
+    const active = Array.from(toolbar.element.querySelectorAll('button.active')).map((b) => b.getAttribute('title'));
+    expect(active).toContain(t('panel.h2'));
+    expect(active).toContain(t('panel.task'));
+    expect(active).not.toContain(t('panel.h1'));
   });
 
   it('MD buttons fire their actions', () => {
@@ -86,23 +121,12 @@ describe('tier-2 "More" panel', () => {
     const more = Array.from(toolbar.element.querySelectorAll('button')).find((b) => b.getAttribute('title') === t('panel.more'))!;
     more.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(panel.classList.contains('visible')).toBe(true);
-    // cells render visual previews, never raw markdown syntax
+    // cells render visual previews, never raw markdown syntax; only the three
+    // rich-inline extras remain (block types live on toolbar row 2 now).
     expect(panel.textContent).not.toContain('==');
     expect(panel.textContent).not.toContain('||');
-    expect(panel.querySelector('.prev.h1')).not.toBeNull();
-    expect(panel.querySelector('.prev.code')).not.toBeNull();
-  });
-
-  it('a block cell fires onBlockType and closes the panel', () => {
-    const { toolbar, onBlockType, parent } = makeToolbar('md');
-    toolbar.show(RECT, MD_STATE);
-    const panel = panelOf(parent);
-    const more = Array.from(toolbar.element.querySelectorAll('button')).find((b) => b.getAttribute('title') === t('panel.more'))!;
-    more.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    const h1Cell = Array.from(panel.querySelectorAll('button.cell')).find((c) => c.getAttribute('title') === t('panel.h1'))!;
-    h1Cell.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(onBlockType).toHaveBeenCalledWith('h1');
-    expect(panel.classList.contains('visible')).toBe(false);
+    expect(panel.querySelector('.prev .mk')).not.toBeNull();
+    expect(panel.querySelectorAll('button.cell').length).toBe(3);
   });
 
   it('an inline cell (highlight) fires onAction mark', () => {

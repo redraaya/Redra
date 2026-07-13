@@ -114,7 +114,7 @@ export function createEditorController(
       void replaceImageViaPick(img);
     },
     onToolbar: (action, value) => handleToolbarAction(action, value),
-    onBlockType: (kind) => turnInto(kind),
+    onBlockType: () => {}, // block-type change is an MD-controller feature
   }, format);
 
   /** Last selection range shown in the toolbar — restored for link actions
@@ -689,81 +689,6 @@ export function createEditorController(
     duplicateBlock(block);
   }
 
-  /** Inline content to carry across a block-type change. */
-  function blockInlineContent(el: HTMLElement): string {
-    if (/^(p|h[1-6])$/i.test(el.tagName)) return el.innerHTML;
-    const inner = el.querySelector('li, p, td, code');
-    return inner ? inner.innerHTML : (el.textContent ?? '');
-  }
-
-  /** Build the new stamped block element for a "Turn into" change. */
-  function buildBlock(kind: BlockKind, id: string, content: string): HTMLElement {
-    const el = (tag: string): HTMLElement => {
-      const e = doc.createElement(tag);
-      e.setAttribute(REDRA_ID_ATTR, id);
-      return e;
-    };
-    const withInner = (tag: string): HTMLElement => {
-      const e = el(tag);
-      e.innerHTML = content;
-      return e;
-    };
-    switch (kind) {
-      case 'paragraph':
-        return withInner('p');
-      case 'h1':
-      case 'h2':
-      case 'h3':
-        return withInner(kind);
-      case 'ul':
-      case 'ol':
-      case 'task': {
-        const list = el(kind === 'task' ? 'ul' : kind);
-        const li = doc.createElement('li');
-        li.setAttribute(REDRA_ID_ATTR, `${id}-1`);
-        if (kind === 'task') li.className = 'md-task';
-        li.innerHTML = content;
-        list.appendChild(li);
-        return list;
-      }
-      case 'blockquote': {
-        const bq = el('blockquote');
-        const p = doc.createElement('p');
-        p.innerHTML = content;
-        bq.appendChild(p);
-        return bq;
-      }
-      case 'pre': {
-        const pre = el('pre');
-        const code = doc.createElement('code');
-        const tmp = doc.createElement('div');
-        tmp.innerHTML = content;
-        code.textContent = tmp.textContent ?? ''; // code block is plain text
-        pre.appendChild(code);
-        return pre;
-      }
-      case 'hr':
-        return el('hr');
-    }
-  }
-
-  function turnInto(kind: BlockKind): void {
-    if (format !== 'md' || dragging) return; // block-type change is Markdown-only
-    const block = targetBlock();
-    if (!block) return;
-    const id = block.getAttribute(REDRA_ID_ATTR);
-    const parent = block.parentNode as (Node & ParentNode) | null;
-    if (!id || !parent) return;
-    const content = blockInlineContent(block); // read BEFORE ending the session
-    if (session && session.el === block) void endSession(true); // commit current content
-    const newEl = buildBlock(kind, id, content);
-    block.replaceWith(newEl);
-    const entry = history.push({ kind: 'replaceBlock', oldNode: block, newNode: newEl });
-    emitAvailability();
-    void pushOp({ type: 'replaceBlock', id, html: newEl.outerHTML }, entry);
-    pinBlock(newEl); // keep the handle on the transformed block
-  }
-
   function deleteBlockAction(): void {
     if (dragging) return;
     const block = targetBlock();
@@ -1071,9 +996,8 @@ export function createEditorController(
       }
       emitAvailability();
     },
-    turnInto(kind: BlockKind): void {
-      if (destroyed) return;
-      turnInto(kind);
+    turnInto(): void {
+      // Block-type change is Markdown-only and lives in the md controller.
     },
     applyFormat(action: ToolbarAction): void {
       // handleToolbarAction already no-ops without a session / with a collapsed

@@ -4,9 +4,7 @@ export { renderBlockHtml, renderDocumentBody, escapeHtml, isSafeUrl, collectDefi
 export type { MdDefinition } from './md-render.js';
 export { sanitizeBlockHtml, stripForgedStamps } from './md-sanitize.js';
 export { buildDocShell, MD_THEME_PLACEHOLDER } from './doc-shell.js';
-export { serializeMdSource, tryApplyMdOps, MdOpError } from './md-ops.js';
 export { serializeMdFromBody, roundtripOuter } from './md-body-diff.js';
-export { guardMdPush, validateMdOp } from './md-op-guard.js';
 export { sniffFlavor, RICH_DEFAULTS } from './md-flavor.js';
 export type { MdFlavor } from './md-flavor.js';
 export { writeElementMarkdown } from './md-writer.js';

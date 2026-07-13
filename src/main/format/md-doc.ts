@@ -4,32 +4,22 @@
  * HTML code paths stay byte-identical — the format branch is a small,
  * reviewable set of call sites, never a change to the engine or the guard.
  */
-import type { Op } from '../../engine/index.js';
-import type { OpRejectCode } from '../../shared/ipc.js';
 import {
   parseMarkdownDoc,
   renderDocumentBody,
-  renderBlockHtml,
-  collectDefinitions,
   buildDocShell,
-  serializeMdSource,
   serializeMdFromBody,
-  guardMdPush,
   sniffFlavor,
-  mdRootOf,
-  mdBlockIndexOf,
   toMarkdownV2,
   toTelegramHtml,
   escapeHtml,
 } from '../../md/index.js';
-import type { MdDoc, MdFlavor, MdDefinition } from '../../md/index.js';
+import type { MdDoc, MdFlavor } from '../../md/index.js';
 import { MD_THEME } from './md-theme.js';
 
 export interface MdState {
   mdDoc: MdDoc;
   flavor: MdFlavor;
-  /** Minted clone ids active in this document (for guard validation). */
-  mintedClones: Set<string>;
   /**
    * MD 2.0 whole-document editing: the newest committed <main> innerHTML from
    * the live view (null until the first commit). The body-diff serializer runs
@@ -55,7 +45,6 @@ export interface MdState {
 const freshState = (mdDoc: MdDoc): MdState => ({
   mdDoc,
   flavor: sniffFlavor(mdDoc),
-  mintedClones: new Set(),
   liveBody: null,
   liveDirty: false,
   dirtyGen: 0,
@@ -108,11 +97,6 @@ export function newUntitledMd(
   return { stampedHtml, state: freshState(mdDoc) };
 }
 
-/** Save text (the .md source) for a set of journal ops. */
-export function serializeMd(state: MdState, ops: readonly Op[]): string {
-  return serializeMdSource(state.mdDoc, ops, state.flavor);
-}
-
 /**
  * "Copy for Telegram": the document's CURRENT content (the committed live
  * body, serialized and re-parsed) rendered as both clipboard flavors —
@@ -122,39 +106,4 @@ export function serializeMd(state: MdState, ops: readonly Op[]): string {
 export function telegramFlavors(state: MdState): { markdownV2: string; html: string } {
   const tree = parseMarkdownDoc(serializeMdLive(state)).tree;
   return { markdownV2: toMarkdownV2(tree), html: toTelegramHtml(tree) };
-}
-
-export type MdGuardResult =
-  | { ok: true; op: Op }
-  | { ok: false; error: string; code: OpRejectCode };
-
-/** ops:push gate for md — mirrors guardDocPush's return contract. */
-export function guardMd(
-  payloadDocId: unknown,
-  raw: unknown,
-  currentDocId: string,
-  state: MdState,
-  activeOps: readonly Op[],
-): MdGuardResult {
-  return guardMdPush(payloadDocId, raw, currentDocId, state.mdDoc, activeOps, state.mintedClones);
-}
-
-/**
- * Re-render one block's HTML by id (for a live clone insert). md v1 keeps
- * block duplication simple: the clone is a fresh render of the SAME source
- * block stamped under a minted clone id. Returns null if the id is unknown.
- */
-export function renderMdCloneFragment(state: MdState, targetId: string, cloneId: string): string | null {
-  const root = mdRootOf(targetId);
-  if (root !== targetId) return null; // v1: only top-level blocks clone
-  const idx = mdBlockIndexOf(targetId);
-  if (idx === null || idx < 0 || idx >= state.mdDoc.blocks.length) return null;
-  const block = state.mdDoc.blocks[idx]!;
-  const defs = new Map<string, MdDefinition>();
-  for (const b of state.mdDoc.blocks) {
-    for (const [k, v] of collectDefinitions(b.node as { children?: unknown[] })) defs.set(k, v);
-  }
-  const html = renderBlockHtml({ ...block, rootId: cloneId }, defs);
-  state.mintedClones.add(cloneId);
-  return html;
 }
