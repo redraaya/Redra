@@ -28,13 +28,23 @@ type P5Node = DefaultTreeAdapterMap['node'];
 type P5Element = DefaultTreeAdapterMap['element'];
 type P5Parent = DefaultTreeAdapterMap['parentNode'];
 
-/** Subtree is removed entirely. */
+/** Subtree is removed entirely. `input` is dropped too — EXCEPT the one form
+ *  control of our own vocabulary, the task checkbox (see isTaskCheckbox). */
 const DROP_TAGS = new Set([
   'script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed',
   'link', 'meta', 'base', 'form', 'input', 'button', 'select', 'textarea',
   'video', 'audio', 'source', 'track', 'canvas', 'svg', 'math', 'template',
   'slot', 'dialog',
 ]);
+
+/** The ONLY <input> allowed through: the task-list checkbox the renderer
+ *  emits (type=checkbox; interactive inside the whole-document editable). */
+function isTaskCheckbox(el: P5Element): boolean {
+  return (
+    el.tagName === 'input' &&
+    el.attrs.some((a) => a.name === 'type' && a.value === 'checkbox')
+  );
+}
 
 /** Inline/структурные элементы, внутри которых текстовая сессия безопасна и
  *  писатель умеет их сериализовать — остров из ТОЛЬКО таких остаётся
@@ -75,6 +85,17 @@ function filterAttrs(el: P5Element): void {
     else if (name === 'alt' && tag === 'img') kept.push(attr);
     else if (name === 'start' && tag === 'ol' && /^\d{1,6}$/.test(attr.value)) kept.push(attr);
     else if (name === 'open' && tag === 'details') kept.push(attr);
+    else if (
+      tag === 'input' &&
+      (name === 'type' || name === 'checked' || name === 'contenteditable' || name === 'tabindex')
+    ) {
+      // The task checkbox's exact attribute set — nothing else survives on an
+      // input (no name/value/handlers), and non-checkbox inputs never get here.
+      if (name === 'type') kept.push({ name, value: 'checkbox' });
+      else if (name === 'checked') kept.push({ name, value: '' });
+      else if (name === 'contenteditable') kept.push({ name, value: 'false' });
+      else kept.push({ name, value: '-1' });
+    }
     else if (name === 'class') {
       const filtered = filterClass(attr.value);
       if (filtered !== '') kept.push({ name, value: filtered });
@@ -97,7 +118,7 @@ function sanitizeNode(node: P5Parent): boolean {
   for (let i = children.length - 1; i >= 0; i--) {
     const child = children[i]!;
     if (!isElement(child)) continue; // text/comment nodes stay (comments are inert)
-    if (DROP_TAGS.has(child.tagName)) {
+    if (DROP_TAGS.has(child.tagName) && !isTaskCheckbox(child)) {
       children.splice(i, 1);
       continue;
     }

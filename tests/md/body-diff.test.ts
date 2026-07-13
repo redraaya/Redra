@@ -165,6 +165,32 @@ describe('body-diff: native-editing artifacts', () => {
   });
 });
 
+describe('body-diff: task checkboxes', () => {
+  it('toggling a checkbox in the live body flips [ ] to [x] in the file', () => {
+    const src = '- [ ] задача\n- [x] сделано\n';
+    const doc = parseMarkdownDoc(src);
+    const body = renderDocumentBody(doc.blocks);
+    // The click handler sets the checked ATTRIBUTE and the li class.
+    const toggled = body
+      .replace('<input type="checkbox" contenteditable="false" tabindex="-1">', '<input type="checkbox" contenteditable="false" tabindex="-1" checked="">')
+      .replace('class="md-task"', 'class="md-task md-task-done"');
+    const out = serializeMdFromBody(doc, toggled, sniffFlavor(doc));
+    expect(out).toBe('- [x] задача\n- [x] сделано\n');
+  });
+
+  it('a foreign input (not our checkbox) never reaches the file', () => {
+    const src = 'x\n';
+    const doc = parseMarkdownDoc(src);
+    const out = serializeMdFromBody(
+      doc,
+      '<p data-redra-id="m0"><input type="password" name="pw" onchange="x()">text</p>',
+      sniffFlavor(doc),
+    );
+    expect(out).not.toContain('<input');
+    expect(out).toContain('text');
+  });
+});
+
 describe('body-diff: the writer stays the security gate', () => {
   it('an edited link with an unsafe scheme is blanked', () => {
     const src = 'тут [ссылка](https://ok.com) была\n';

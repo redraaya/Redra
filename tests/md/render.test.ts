@@ -120,6 +120,15 @@ describe('md-render: construct coverage', () => {
     expect(html).not.toContain('<p');
   });
 
+  it('task items carry a REAL interactive checkbox that survives the sanitizer', () => {
+    const html = renderOne('- [ ] раз\n- [x] два\n');
+    // Unchecked and checked forms, contenteditable=false (interactive inside
+    // the whole-document editable), no other input attrs.
+    expect(html).toContain('<input type="checkbox" contenteditable="false" tabindex="-1">');
+    expect(html).toContain('checked');
+    expect(html).not.toMatch(/<input[^>]* (name|value|on[a-z]+)=/);
+  });
+
   it('table: first row is <th>, alignment classes applied', () => {
     const html = renderOne('| a | b |\n|:-:|--:|\n| 1 | 2 |\n');
     expect(html).toContain('<th class="al-c"');
