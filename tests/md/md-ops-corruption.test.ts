@@ -197,6 +197,26 @@ describe('re-review: block children of a list item are not destroyed', () => {
   });
 });
 
+describe('final gate: the mainline inline writer never writes an unsafe URL to the file', () => {
+  const cases: Array<[string, string, string]> = [
+    ['paragraph link', 'hello\n', '<a href="javascript:alert(1)">click</a>'],
+    ['paragraph img data:', 'hello\n', '<img src="data:text/html,<script>x</script>" alt="p">'],
+    ['blockquote link vbscript', '> quote\n', '<a href="vbscript:msgbox(1)">x</a>'],
+  ];
+  for (const [name, src, payload] of cases) {
+    it(`${name}: unsafe scheme is blanked`, () => {
+      const out = save(src, [{ type: 'editText', id: 'm0', html: payload }]);
+      expect(out.toLowerCase()).not.toContain('javascript:');
+      expect(out.toLowerCase()).not.toContain('vbscript:');
+      expect(out.toLowerCase()).not.toContain('data:text/html');
+    });
+  }
+  it('a legitimate https link is preserved', () => {
+    const out = save('hi\n', [{ type: 'editText', id: 'm0', html: '<a href="https://e.com/a">x</a>' }]);
+    expect(out).toContain('https://e.com/a');
+  });
+});
+
 describe('re-review: reference-style link round-trips as a working link on edit', () => {
   it('editing a paragraph with [text][ref] keeps the link (resolved), definition stays', () => {
     const src = 'See [the docs][d] here.\n\n[d]: https://example.com/docs\n';

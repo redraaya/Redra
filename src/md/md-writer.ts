@@ -187,14 +187,20 @@ function writeInlineNode(node: P5Node, ctx: Ctx): string {
       if (hasClass(node, 'md-math')) return `$${textContent(node)}$`;
       return writeInlineChildren(node, ctx); // plain span: transparent
     case 'a': {
-      const href = attr(node, 'href') ?? '';
+      // The writer is a SAVE GATE: an unsafe scheme must never reach the file
+      // (an editText payload bypasses render-time sanitization). Blank it, like
+      // md-render and islandHtml do — all three URL paths must agree.
+      const raw = attr(node, 'href') ?? '';
+      const href = isSafeUrl(raw) ? raw : '';
       const inner = writeInlineChildren(node, ctx);
       if (inner === '' && href === '') return '';
       return `[${inner}](${linkDest(href)})`;
     }
     case 'img': {
       const alt = (attr(node, 'alt') ?? '').replace(/([[\]\\])/g, '\\$1');
-      return `![${alt}](${linkDest(attr(node, 'src') ?? '')})`;
+      const raw = attr(node, 'src') ?? '';
+      const src = isSafeUrl(raw) ? raw : '';
+      return `![${alt}](${linkDest(src)})`;
     }
     case 'br':
       // Single <br> = hard break; the paragraph writer turns <br><br> into a
