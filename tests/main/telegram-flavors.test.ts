@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseMd, telegramFlavors } from '../../src/main/format/md-doc.js';
+import { parseMd, telegramFlavors, htmlToRtf } from '../../src/main/format/md-doc.js';
 import { renderDocumentBody } from '../../src/md/index.js';
 import { parseMarkdownDoc } from '../../src/md/md-parse.js';
 
@@ -28,4 +28,17 @@ describe('telegramFlavors', () => {
     expect(html).not.toContain('data-redra');
     expect(html).not.toContain('<input');
   });
+
+  it.skipIf(process.platform !== 'darwin')(
+    'RTF flavor: the macOS converter yields real RTF with the content intact',
+    async () => {
+      const { state } = parseMd(SRC, 'x.md');
+      const { html } = telegramFlavors(state);
+      const rtf = await htmlToRtf(html);
+      expect(rtf).not.toBeNull();
+      expect(rtf!.startsWith('{\\rtf1')).toBe(true);
+      // Cyrillic must survive as RTF unicode escapes (П = \u1055).
+      expect(rtf!).toContain('\\u1055');
+    },
+  );
 });

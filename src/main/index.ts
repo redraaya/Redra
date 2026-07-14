@@ -22,7 +22,7 @@ import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
 import { guardCloneBlock, guardDocPush } from './lib/op-guard.js';
-import { telegramFlavors } from './format/md-doc.js';
+import { telegramFlavors, htmlToRtf } from './format/md-doc.js';
 import { OPENABLE_RE, UNTITLED_MD_NAME } from '../shared/doc-types.js';
 import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
 import { getElementById, renderCloneFragment } from '../engine/index.js';
@@ -211,7 +211,10 @@ async function copyForTelegram(ctx: WindowContext): Promise<void> {
   const cur = ctx.docManager.currentDoc;
   if (!cur || cur.format !== 'md' || !cur.mdState) return;
   const { text, html } = telegramFlavors(cur.mdState);
-  clipboard.write({ text, html });
+  // Native composers (Telegram macOS included) prefer RTF over public.html —
+  // without it the paste falls back to plain text.
+  const rtf = await htmlToRtf(html);
+  clipboard.write(rtf === null ? { text, html } : { text, html, rtf });
   sendToShell(ctx, 'notice:show', { text: t('notice.copiedTelegram') });
 }
 
