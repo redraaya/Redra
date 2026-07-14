@@ -20,7 +20,7 @@ describe('clipboard HTML: standard document markup', () => {
       '# Заголовок\n\nАбзац с **жирным** и [ссылкой](https://e.com).\n\n- пункт\n\n> цитата\n\n```js\nconst x = 1;\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n',
     );
     expect(out).toContain('<h1>Заголовок</h1>');
-    expect(out).toContain('<strong>жирным</strong>');
+    expect(out).toContain('<b>жирным</b>'); // naive-parser-friendly pair
     expect(out).toContain('<a href="https://e.com">ссылкой</a>');
     expect(out).toContain('<ul><li>пункт</li></ul>');
     expect(out).toContain('<blockquote>');

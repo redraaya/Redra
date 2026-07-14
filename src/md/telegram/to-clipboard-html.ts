@@ -57,6 +57,14 @@ function scrub(parent: P5Parent): void {
       return;
     }
 
+    // Naive rich-paste parsers know <b>/<i> but not always <strong>/<em> —
+    // canonicalize to the simple pair (semantically identical on paste).
+    const SIMPLE: Record<string, string> = { strong: 'b', em: 'i', del: 's', strike: 's', ins: 'u' };
+    const simple = SIMPLE[child.tagName];
+    if (simple) {
+      (child as { tagName: string }).tagName = simple;
+      (child as { nodeName: string }).nodeName = simple;
+    }
     child.attrs = child.attrs.filter(
       (a) => !a.name.startsWith('data-redra-') && a.name !== 'class' && a.name !== 'contenteditable' && a.name !== 'tabindex',
     );

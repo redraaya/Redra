@@ -4,7 +4,6 @@
  * HTML code paths stay byte-identical — the format branch is a small,
  * reviewable set of call sites, never a change to the engine or the guard.
  */
-import { execFile } from 'node:child_process';
 import {
   parseMarkdownDoc,
   renderDocumentBody,
@@ -12,6 +11,7 @@ import {
   serializeMdFromBody,
   sniffFlavor,
   toClipboardHtml,
+  toClipboardRtf,
   escapeHtml,
 } from '../../md/index.js';
 import type { MdDoc, MdFlavor } from '../../md/index.js';
@@ -104,30 +104,13 @@ export function newUntitledMd(
  * tables live) and, as the text fallback, the clean GFM source itself (never
  * an escaped bot dialect: a text-only paste must read as Markdown).
  */
-export function telegramFlavors(state: MdState): { text: string; html: string } {
+export function telegramFlavors(state: MdState): { text: string; html: string; rtf: string } {
   const source = serializeMdLive(state);
   const doc = parseMarkdownDoc(source);
-  return { text: source, html: toClipboardHtml(renderDocumentBody(doc.blocks)) };
-}
-
-/**
- * The RTF flavor for the same paste. NATIVE macOS apps (Telegram's composer
- * is an NSTextView at heart) read public.rtf / the attributed string before —
- * often instead of — public.html; a clipboard with only text+html falls back
- * to plain text there. macOS's own converter (textutil, the engine behind
- * Safari/TextEdit clipboards) turns our standard HTML into exactly the RTF
- * those apps expect. Returns null off-macOS or on any converter hiccup —
- * the paste then simply rides on html/text.
- */
-export function htmlToRtf(html: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const child = execFile(
-      'textutil',
-      ['-convert', 'rtf', '-format', 'html', '-stdin', '-stdout'],
-      { maxBuffer: 64 * 1024 * 1024 },
-      (err, stdout) => resolve(err || stdout.length === 0 ? null : stdout),
-    );
-    // A full document with an explicit charset — Cyrillic must survive.
-    child.stdin?.end(`<!doctype html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`);
-  });
+  const html = toClipboardHtml(renderDocumentBody(doc.blocks));
+  // RTF is hand-written with EXPLICIT \b/\i/\ul flags: field round 3 proved
+  // Telegram's composer reads the RTF flavor but ignores textutil's
+  // font-switch emphasis (Times-Bold), keeping only links. Naive parsers get
+  // flags; capable ones (TextEdit, Pages, Mail) read the same primitives.
+  return { text: source, html, rtf: toClipboardRtf(html) };
 }

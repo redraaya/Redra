@@ -22,7 +22,7 @@ import { fetchLatestRelease, shouldNotify } from './lib/update-check.js';
 import { makeT, pickLang } from '../shared/i18n.js';
 import { tildify } from './lib/tildify.js';
 import { guardCloneBlock, guardDocPush } from './lib/op-guard.js';
-import { telegramFlavors, htmlToRtf } from './format/md-doc.js';
+import { telegramFlavors } from './format/md-doc.js';
 import { OPENABLE_RE, UNTITLED_MD_NAME } from '../shared/doc-types.js';
 import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
 import { getElementById, renderCloneFragment } from '../engine/index.js';
@@ -210,11 +210,10 @@ async function copyForTelegram(ctx: WindowContext): Promise<void> {
   await commitActiveEdit(ctx);
   const cur = ctx.docManager.currentDoc;
   if (!cur || cur.format !== 'md' || !cur.mdState) return;
-  const { text, html } = telegramFlavors(cur.mdState);
-  // Native composers (Telegram macOS included) prefer RTF over public.html —
-  // without it the paste falls back to plain text.
-  const rtf = await htmlToRtf(html);
-  clipboard.write(rtf === null ? { text, html } : { text, html, rtf });
+  // Three flavors: native composers read RTF first (Telegram macOS included),
+  // browser-style receivers read HTML, everything else gets clean GFM text.
+  const { text, html, rtf } = telegramFlavors(cur.mdState);
+  clipboard.write({ text, html, rtf });
   sendToShell(ctx, 'notice:show', { text: t('notice.copiedTelegram') });
 }
 

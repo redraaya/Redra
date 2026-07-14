@@ -10,4 +10,5 @@ export type { MdFlavor } from './md-flavor.js';
 export { writeElementMarkdown } from './md-writer.js';
 export { mdRootOf, mdBlockIndexOf, cloneRootOf, anyRootOf } from './md-types.js';
 export { toClipboardHtml } from './telegram/to-clipboard-html.js';
+export { toClipboardRtf } from './telegram/to-clipboard-rtf.js';
 export type { MdDoc, MdBlockEntry, MdSpan } from './md-types.js';

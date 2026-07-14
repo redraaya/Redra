@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseMd, telegramFlavors, htmlToRtf } from '../../src/main/format/md-doc.js';
+import { parseMd, telegramFlavors } from '../../src/main/format/md-doc.js';
 import { renderDocumentBody } from '../../src/md/index.js';
 import { parseMarkdownDoc } from '../../src/md/md-parse.js';
 
@@ -23,22 +23,37 @@ describe('telegramFlavors', () => {
     const { state } = parseMd(SRC, 'x.md');
     const { html } = telegramFlavors(state);
     expect(html).toContain('<h1>Пост</h1>');
-    expect(html).toContain('<strong>Жирный</strong>');
+    expect(html).toContain('<b>Жирный</b>');
     expect(html).toContain('☑');
     expect(html).not.toContain('data-redra');
     expect(html).not.toContain('<input');
   });
 
+  it('RTF flavor: explicit attribute flags a naive parser understands', () => {
+    const { state } = parseMd(SRC, 'x.md');
+    const { rtf } = telegramFlavors(state);
+    expect(rtf.startsWith('{\\rtf1')).toBe(true);
+    expect(rtf).toContain('{\\b '); // bold as a FLAG, never a font switch
+    expect(rtf).toContain('\\u1055 '); // Cyrillic П as a unicode escape
+    expect(rtf).toContain('{\\b\\fs40 '); // the H1
+    expect(rtf).not.toContain('Times-Bold'); // the textutil failure mode
+  });
+
   it.skipIf(process.platform !== 'darwin')(
-    'RTF flavor: the macOS converter yields real RTF with the content intact',
+    'RTF round-trips through the system reader with SPACES intact (\\uc0 contract)',
     async () => {
+      const { execFile } = await import('node:child_process');
       const { state } = parseMd(SRC, 'x.md');
-      const { html } = telegramFlavors(state);
-      const rtf = await htmlToRtf(html);
-      expect(rtf).not.toBeNull();
-      expect(rtf!.startsWith('{\\rtf1')).toBe(true);
-      // Cyrillic must survive as RTF unicode escapes (П = \u1055).
-      expect(rtf!).toContain('\\u1055');
+      const { rtf } = telegramFlavors(state);
+      const text = await new Promise<string>((resolve, reject) => {
+        const child = execFile(
+          'textutil',
+          ['-convert', 'txt', '-format', 'rtf', '-stdin', '-stdout'],
+          (err, stdout) => (err ? reject(err) : resolve(stdout)),
+        );
+        child.stdin?.end(rtf);
+      });
+      expect(text).toContain('Жирный и'); // words keep their separating spaces
     },
   );
 });
