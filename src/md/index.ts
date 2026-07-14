@@ -9,6 +9,5 @@ export { sniffFlavor, RICH_DEFAULTS } from './md-flavor.js';
 export type { MdFlavor } from './md-flavor.js';
 export { writeElementMarkdown } from './md-writer.js';
 export { mdRootOf, mdBlockIndexOf, cloneRootOf, anyRootOf } from './md-types.js';
-export { toMarkdownV2 } from './telegram/to-markdownv2.js';
-export { toTelegramHtml } from './telegram/to-html.js';
+export { toClipboardHtml } from './telegram/to-clipboard-html.js';
 export type { MdDoc, MdBlockEntry, MdSpan } from './md-types.js';

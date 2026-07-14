@@ -8,3 +8,4 @@ out/
 .claude/
 backup-pre-rewrite.bundle
 Redra-baseline-fable5-v0.3.0.bundle
+backup-pre-email-scrub.bundle

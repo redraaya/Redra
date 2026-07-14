@@ -210,8 +210,8 @@ async function copyForTelegram(ctx: WindowContext): Promise<void> {
   await commitActiveEdit(ctx);
   const cur = ctx.docManager.currentDoc;
   if (!cur || cur.format !== 'md' || !cur.mdState) return;
-  const { markdownV2, html } = telegramFlavors(cur.mdState);
-  clipboard.write({ text: markdownV2, html });
+  const { text, html } = telegramFlavors(cur.mdState);
+  clipboard.write({ text, html });
   sendToShell(ctx, 'notice:show', { text: t('notice.copiedTelegram') });
 }
 

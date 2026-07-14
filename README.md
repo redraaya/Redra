@@ -30,8 +30,9 @@ split-screen preview, no broken formatting. Or export it to PDF.
   highlight and super/subscript, shown as **visual previews of the result**,
   not a cheat-sheet of symbols.
 - **Copy for Telegram (⌥⌘C).** Write a post in Redra and paste it straight into
-  Telegram with formatting intact — the clipboard carries both Telegram's rich
-  HTML and MarkdownV2.
+  Telegram's formatting-aware composer with everything intact — the clipboard
+  carries the document as standard rich HTML, plus the clean Markdown source as
+  the plain-text fallback.
 - **New file (⌘N).** Start a fresh Markdown document; it becomes a real file on
   your first ⌘S. (A new empty window moved to ⌘⇧N.)
 - **It matches your file's style.** Redra sniffs how an opened file already

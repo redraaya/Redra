@@ -10,8 +10,7 @@ import {
   buildDocShell,
   serializeMdFromBody,
   sniffFlavor,
-  toMarkdownV2,
-  toTelegramHtml,
+  toClipboardHtml,
   escapeHtml,
 } from '../../md/index.js';
 import type { MdDoc, MdFlavor } from '../../md/index.js';
@@ -98,12 +97,14 @@ export function newUntitledMd(
 }
 
 /**
- * "Copy for Telegram": the document's CURRENT content (the committed live
- * body, serialized and re-parsed) rendered as both clipboard flavors —
- * MarkdownV2 (for the classic composer / Bot API) and Telegram HTML
- * parse-mode (Desktop pastes it rich).
+ * "Copy for Telegram": the document's CURRENT content in the two flavors the
+ * 2026 composer actually eats — STANDARD document HTML (our own render,
+ * scrubbed of internals: a rich paste lands with headings/lists/checklists/
+ * tables live) and, as the text fallback, the clean GFM source itself (never
+ * an escaped bot dialect: a text-only paste must read as Markdown).
  */
-export function telegramFlavors(state: MdState): { markdownV2: string; html: string } {
-  const tree = parseMarkdownDoc(serializeMdLive(state)).tree;
-  return { markdownV2: toMarkdownV2(tree), html: toTelegramHtml(tree) };
+export function telegramFlavors(state: MdState): { text: string; html: string } {
+  const source = serializeMdLive(state);
+  const doc = parseMarkdownDoc(source);
+  return { text: source, html: toClipboardHtml(renderDocumentBody(doc.blocks)) };
 }

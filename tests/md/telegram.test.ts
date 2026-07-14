@@ -1,104 +1,55 @@
 import { describe, expect, it } from 'vitest';
 import { parseMarkdownDoc } from '../../src/md/md-parse.js';
-import { toMarkdownV2 } from '../../src/md/telegram/to-markdownv2.js';
-import { toTelegramHtml } from '../../src/md/telegram/to-html.js';
-import { escapeV2 } from '../../src/md/telegram/escaper.js';
+import { renderDocumentBody } from '../../src/md/md-render.js';
+import { toClipboardHtml } from '../../src/md/telegram/to-clipboard-html.js';
 
-const mv2 = (md: string): string => toMarkdownV2(parseMarkdownDoc(md).tree);
-const tgHtml = (md: string): string => toTelegramHtml(parseMarkdownDoc(md).tree);
+/**
+ * "Copy for Telegram" — the 2026 composer contract:
+ *   text  = the clean GFM source itself (asserted at the md-doc level: it IS
+ *           serializeMdLive's output, no escaping dialects);
+ *   html  = STANDARD document HTML — our own render scrubbed of every
+ *           internal artefact, exactly what a browser-style rich paste needs.
+ */
 
-describe('MarkdownV2 escaper', () => {
-  it('escapes all 18 special characters outside entities', () => {
-    expect(escapeV2('a_b*c[d]e(f)g~h`i>j#k+l-m=n|o{p}q.r!s')).toBe(
-      'a\\_b\\*c\\[d\\]e\\(f\\)g\\~h\\`i\\>j\\#k\\+l\\-m\\=n\\|o\\{p\\}q\\.r\\!s',
+const html = (src: string): string =>
+  toClipboardHtml(renderDocumentBody(parseMarkdownDoc(src).blocks));
+
+describe('clipboard HTML: standard document markup', () => {
+  it('keeps real headings, lists, quotes, code and tables', () => {
+    const out = html(
+      '# Заголовок\n\nАбзац с **жирным** и [ссылкой](https://e.com).\n\n- пункт\n\n> цитата\n\n```js\nconst x = 1;\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n',
     );
+    expect(out).toContain('<h1>Заголовок</h1>');
+    expect(out).toContain('<strong>жирным</strong>');
+    expect(out).toContain('<a href="https://e.com">ссылкой</a>');
+    expect(out).toContain('<ul><li>пункт</li></ul>');
+    expect(out).toContain('<blockquote>');
+    expect(out).toContain('<pre><code>const x = 1;</code></pre>');
+    expect(out).toContain('<table>');
   });
-});
 
-describe('mdast → MarkdownV2 (Telegram classic composer)', () => {
-  it('bold uses * (not **), italic uses _', () => {
-    expect(mv2('**жирный** и *курсив*\n')).toBe('*жирный* и _курсив_');
+  it('carries NO internal artefacts: stamps, classes, inputs, contenteditable', () => {
+    const out = html('- [x] сделано\n- [ ] нет\n\n||секрет|| и ==маркер==\n');
+    expect(out).not.toContain('data-redra');
+    expect(out).not.toContain('class=');
+    expect(out).not.toContain('<input');
+    expect(out).not.toContain('contenteditable');
+    expect(out).not.toContain('tg-spoiler');
   });
-  it('strikethrough uses a SINGLE tilde', () => {
-    expect(mv2('~~зачёркнутый~~\n')).toBe('~зачёркнутый~');
-  });
-  it('spoiler stays ||…||', () => {
-    expect(mv2('тут ||секрет|| да\n')).toBe('тут ||секрет|| да');
-  });
-  it('underline <u> becomes __…__', () => {
-    expect(mv2('вот <u>подчёркнуто</u> тут\n')).toBe('вот __подчёркнуто__ тут');
-  });
-  it('inline code escapes only backticks/backslashes', () => {
-    expect(mv2('`a.b-c`\n')).toBe('`a.b-c`');
-  });
-  it('a heading flattens to a bold line', () => {
-    expect(mv2('# Заголовок\n')).toBe('*Заголовок*');
-  });
-  it('a link with special chars in text is escaped, url is angle-safe', () => {
-    expect(mv2('[текст.тут](https://e.com/a)\n')).toBe('[текст\\.тут](https://e.com/a)');
-  });
-  it('lists render as bullets / numbers', () => {
-    expect(mv2('- раз\n- два\n')).toBe('• раз\n• два');
-    expect(mv2('1. раз\n2. два\n')).toBe('1\\. раз\n2\\. два');
-  });
-  it('a paragraph escapes literal dots and dashes', () => {
-    expect(mv2('Версия 1.0 - готово!\n')).toBe('Версия 1\\.0 \\- готово\\!');
-  });
-  it('a code block keeps its language and does not escape body dots', () => {
-    expect(mv2('```js\nconst a = 1.0;\n```\n')).toBe('```js\nconst a = 1.0;\n```');
-  });
-  it('drops an unsafe link scheme', () => {
-    // eslint-disable-next-line no-script-url
-    expect(mv2('[x](javascript:alert(1))\n')).not.toContain('javascript:');
-  });
-});
 
-describe('mdast → MarkdownV2: adversarial-review regressions', () => {
-  it('a nested blockquote does not emit an unescaped inner ">" (Bot API reject)', () => {
-    const out = mv2('> > deep\n');
-    // Every line has exactly ONE leading marker; no line starts ">>".
-    for (const line of out.split('\n')) {
-      expect(line.startsWith('>>')).toBe(false);
-    }
-    expect(out).toContain('deep');
+  it('task checkboxes become text glyphs; spoilers unwrap to their text', () => {
+    const out = html('- [x] сделано\n- [ ] нет\n\n||секрет||\n');
+    expect(out).toContain('☑ сделано');
+    expect(out).toContain('☐ нет');
+    expect(out).toContain('секрет');
   });
-  it('an empty heading emits nothing, not an empty "**" entity', () => {
-    expect(mv2('# \n')).toBe('');
-    expect(mv2('# \n\ntext\n')).toBe('text');
-  });
-  it('a table is flattened to rows with escaped pipe separators (no run-on)', () => {
-    const out = mv2('| a.b | c |\n|---|---|\n| 1! | 2 |\n');
-    expect(out).toContain('a\\.b \\| c');
-    expect(out).toContain('1\\! \\| 2');
-    expect(out).not.toContain('a\\.bc'); // cells no longer fused
-  });
-  it('a link URL containing a raw space is dropped (kept as text)', () => {
-    const out = mv2('[t](<https://e.com/a b>)\n');
-    expect(out).not.toContain('](');
-  });
-});
 
-describe('mdast → Telegram HTML parse-mode', () => {
-  it('emits b/i/s/tg-spoiler and escapes text', () => {
-    expect(tgHtml('**ж** *к* ~~з~~ ||с||\n')).toBe('<b>ж</b> <i>к</i> <s>з</s> <tg-spoiler>с</tg-spoiler>');
+  it('highlight stays a standard <mark>', () => {
+    expect(html('==важное==\n')).toContain('<mark>важное</mark>');
   });
-  it('heading → <b>, code → <pre><code>', () => {
-    expect(tgHtml('# H\n')).toBe('<b>H</b>');
-    expect(tgHtml('```py\nx\n```\n')).toBe('<pre><code class="language-py">x</code></pre>');
-  });
-  it('escapes < > & in text', () => {
-    expect(tgHtml('a < b & c > d\n')).toBe('a &lt; b &amp; c &gt; d');
-  });
-  it('link with safe url', () => {
-    expect(tgHtml('[t](https://e.com)\n')).toBe('<a href="https://e.com">t</a>');
-  });
-  it('an empty heading emits nothing, not <b></b>', () => {
-    expect(tgHtml('# \n')).toBe('');
-  });
-  it('a table is flattened to " | "-separated rows, not a run-on string', () => {
-    const out = tgHtml('| a | b |\n|---|---|\n| 1 | 2 |\n');
-    expect(out).toContain('a | b');
-    expect(out).toContain('1 | 2');
-    expect(out).not.toContain('ab1'); // header + body no longer fused
+
+  it('an unsafe link scheme never reaches the clipboard (render already blanks it)', () => {
+    const out = html('[x](javascript:alert(1))\n');
+    expect(out).not.toContain('javascript:');
   });
 });
