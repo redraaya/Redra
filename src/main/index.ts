@@ -210,10 +210,12 @@ async function copyForTelegram(ctx: WindowContext): Promise<void> {
   await commitActiveEdit(ctx);
   const cur = ctx.docManager.currentDoc;
   if (!cur || cur.format !== 'md' || !cur.mdState) return;
-  // Three flavors: native composers read RTF first (Telegram macOS included),
-  // browser-style receivers read HTML, everything else gets clean GFM text.
-  const { text, html, rtf } = telegramFlavors(cur.mdState);
-  clipboard.write({ text, html, rtf });
+  // Two flavors that reach a real Telegram target: RTF for the native composer
+  // (live links + structure) and text (clean GFM) for a verbatim paste or, the
+  // pretty path, Telegram's AI-compose which reads the Markdown. The macOS
+  // client never reads text/html on paste, so no HTML flavor.
+  const { text, rtf } = telegramFlavors(cur.mdState);
+  clipboard.write({ text, rtf });
   sendToShell(ctx, 'notice:show', { text: t('notice.copiedTelegram') });
 }
 

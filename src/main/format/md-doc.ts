@@ -98,19 +98,26 @@ export function newUntitledMd(
 }
 
 /**
- * "Copy for Telegram": the document's CURRENT content in the two flavors the
- * 2026 composer actually eats — STANDARD document HTML (our own render,
- * scrubbed of internals: a rich paste lands with headings/lists/checklists/
- * tables live) and, as the text fallback, the clean GFM source itself (never
- * an escaped bot dialect: a text-only paste must read as Markdown).
+ * "Copy for Telegram": the document's CURRENT content in the two clipboard
+ * flavors that reach a real Telegram target (proven by reading the macOS
+ * client's own paste code, github.com/overtake/TelegramSwift):
+ *
+ *  - text : the clean GFM source. Telegram's composer shows it verbatim; its
+ *    AI-compose reads the Markdown and formats the whole post — the path that
+ *    carries bold/headings/etc. all the way through.
+ *  - rtf  : hyperlink fields (→ live link entities) + block structure +
+ *    literal glyphs, which the native composer honours. Character emphasis
+ *    (\b/\i) is kept for capable RTF readers (TextEdit, Mail, Pages) even
+ *    though Telegram's paste maps fonts to no entity and drops it.
+ *
+ * No HTML flavor: the macOS composer's paste path has no text/html branch
+ * (ChatInputView.processPaste) — it would be dead weight.
  */
-export function telegramFlavors(state: MdState): { text: string; html: string; rtf: string } {
+export function telegramFlavors(state: MdState): { text: string; rtf: string } {
   const source = serializeMdLive(state);
   const doc = parseMarkdownDoc(source);
-  const html = toClipboardHtml(renderDocumentBody(doc.blocks));
-  // RTF is hand-written with EXPLICIT \b/\i/\ul flags: field round 3 proved
-  // Telegram's composer reads the RTF flavor but ignores textutil's
-  // font-switch emphasis (Times-Bold), keeping only links. Naive parsers get
-  // flags; capable ones (TextEdit, Pages, Mail) read the same primitives.
-  return { text: source, html, rtf: toClipboardRtf(html) };
+  // The scrubbed HTML is an INTERNAL step the RTF writer consumes (bounded
+  // vocabulary); it is never published to the clipboard.
+  const scrubbedHtml = toClipboardHtml(renderDocumentBody(doc.blocks));
+  return { text: source, rtf: toClipboardRtf(scrubbedHtml) };
 }

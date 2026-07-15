@@ -19,14 +19,9 @@ describe('telegramFlavors', () => {
     expect(telegramFlavors(state).text).toContain('**Правленый**');
   });
 
-  it('html flavor is standard scrubbed markup', () => {
+  it('no html flavor is published (the macOS composer never reads it)', () => {
     const { state } = parseMd(SRC, 'x.md');
-    const { html } = telegramFlavors(state);
-    expect(html).toContain('<h1>Пост</h1>');
-    expect(html).toContain('<b>Жирный</b>');
-    expect(html).toContain('☑');
-    expect(html).not.toContain('data-redra');
-    expect(html).not.toContain('<input');
+    expect('html' in telegramFlavors(state)).toBe(false);
   });
 
   it('RTF flavor: explicit attribute flags a naive parser understands', () => {
