@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, WebContentsView, clipboard, dialog, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, Menu, WebContentsView, clipboard, dialog, ipcMain, screen, session, shell } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent, Session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -25,6 +25,7 @@ import { guardCloneBlock, guardDocPush } from './lib/op-guard.js';
 import { telegramFlavors } from './format/md-doc.js';
 import { OPENABLE_RE, UNTITLED_MD_NAME } from '../shared/doc-types.js';
 import { resolveUnsavedBeforeRestore } from './lib/restore-guard.js';
+import { restoreBounds } from './lib/window-bounds.js';
 import { getElementById, renderCloneFragment } from '../engine/index.js';
 import {
   buildImageDataUri,
@@ -449,9 +450,20 @@ function drainPendingOpen(): Promise<OpenResult> | null {
  * stock Window-menu items (merge/move/show tab bar) work via role:windowMenu.
  */
 function createWindowContext(readyAt?: number): WindowContext {
+  // Open at the size (and, when still on-screen, position) the user last
+  // shaped a window to. Smoke/screenshot runs stay at the fixed default so
+  // CI and README shots are reproducible.
+  const rememberBounds = !SMOKE && !shot.enabled;
+  const restored = rememberBounds
+    ? restoreBounds(
+        settingsStore.get().windowBounds,
+        screen.getAllDisplays().map((d) => d.workArea),
+        { width: 800, height: 600 },
+        { width: 1100, height: 760 },
+      )
+    : { width: 1100, height: 760 };
   const win = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    ...restored,
     minWidth: 800,
     minHeight: 600,
     backgroundColor: '#F7F6F3',
@@ -468,6 +480,29 @@ function createWindowContext(readyAt?: number): WindowContext {
     },
   });
   win.setTitle('Redra');
+  if (rememberBounds && settingsStore.get().windowMaximized) win.maximize();
+
+  // Remember how the user shapes the window (debounced: resize streams
+  // events). getNormalBounds so a maximized window doesn't overwrite the
+  // size it will restore to; fullscreen is transient — never persisted.
+  if (rememberBounds) {
+    let boundsTimer: NodeJS.Timeout | null = null;
+    const noteBounds = (): void => {
+      if (boundsTimer) clearTimeout(boundsTimer);
+      boundsTimer = setTimeout(() => {
+        boundsTimer = null;
+        if (win.isDestroyed() || win.isFullScreen()) return;
+        void applySettings({
+          windowBounds: win.getNormalBounds(),
+          windowMaximized: win.isMaximized(),
+        });
+      }, 400);
+    };
+    win.on('resize', noteBounds);
+    win.on('move', noteBounds);
+    win.on('maximize', noteBounds);
+    win.on('unmaximize', noteBounds);
+  }
 
   // One DocumentManager per window: its state IS the per-window document
   // state (OpenedDoc + Journal), so ownership lands where it belongs.

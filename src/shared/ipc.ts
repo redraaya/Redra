@@ -111,6 +111,10 @@ export interface Settings {
   backupOnFirstSave: boolean;
   /** Update-pill version the user dismissed with ✕ — never offer it again. */
   dismissedUpdateVersion?: string;
+  /** Last window bounds (getNormalBounds) — new windows open at this size. */
+  windowBounds?: { x: number; y: number; width: number; height: number };
+  /** The window was maximized — restore that state on top of windowBounds. */
+  windowMaximized?: boolean;
 }
 
 /** One row of the start screen's "Recent" list (display-ready, built in main). */

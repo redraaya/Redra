@@ -31,5 +31,21 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
   if (typeof p['dismissedUpdateVersion'] === 'string') {
     next.dismissedUpdateVersion = p['dismissedUpdateVersion'];
   }
+  const wb = p['windowBounds'] as Record<string, unknown> | undefined;
+  if (
+    typeof wb === 'object' &&
+    wb !== null &&
+    ['x', 'y', 'width', 'height'].every((k) => Number.isFinite((wb as Record<string, unknown>)[k]))
+  ) {
+    next.windowBounds = {
+      x: Math.round(wb['x'] as number),
+      y: Math.round(wb['y'] as number),
+      width: Math.round(wb['width'] as number),
+      height: Math.round(wb['height'] as number),
+    };
+  }
+  if (typeof p['windowMaximized'] === 'boolean') {
+    next.windowMaximized = p['windowMaximized'];
+  }
   return next;
 }

@@ -97,3 +97,29 @@ describe('SettingsStore (fs)', () => {
     expect(store.get().shellTheme).toBe('system');
   });
 });
+
+describe('windowBounds persistence', () => {
+  it('accepts finite bounds and rounds them', () => {
+    const next = mergeSettings(DEFAULT_SETTINGS, {
+      windowBounds: { x: 10.6, y: -200.2, width: 1200.4, height: 900.9 },
+      windowMaximized: true,
+    });
+    expect(next.windowBounds).toEqual({ x: 11, y: -200, width: 1200, height: 901 });
+    expect(next.windowMaximized).toBe(true);
+  });
+
+  it('rejects malformed bounds (missing/NaN/strings) and keeps the previous value', () => {
+    const base = mergeSettings(DEFAULT_SETTINGS, {
+      windowBounds: { x: 0, y: 0, width: 1000, height: 700 },
+    });
+    for (const bad of [
+      { x: 0, y: 0, width: NaN, height: 700 },
+      { x: 0, y: 0, width: '1000', height: 700 },
+      { x: 0, y: 0, height: 700 },
+      'nonsense',
+      null,
+    ]) {
+      expect(mergeSettings(base, { windowBounds: bad }).windowBounds).toEqual(base.windowBounds);
+    }
+  });
+});
