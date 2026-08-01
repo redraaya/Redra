@@ -200,4 +200,33 @@ describe('md-controller: whole-document editing', () => {
     document.dispatchEvent(slashDown);
     expect(slashDown.defaultPrevented).toBe(false); // not consumed — just type it
   });
+
+  it('a drag-selection surviving: the trailing click on <main> must NOT reset a live selection', () => {
+    // Select across two blocks (what a top-to-bottom mouse sweep produces)…
+    const h1 = main.querySelector('h1')!;
+    const p1 = document.getElementById('p1')!;
+    const range = document.createRange();
+    range.setStartBefore(h1.firstChild ?? h1);
+    range.setEndAfter(p1.firstChild ?? p1);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    expect(sel.isCollapsed).toBe(false);
+
+    // …then the browser fires a click whose target is <main> (button released
+    // over the padding). The caret-placement path must stay out of the way.
+    main.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(window.getSelection()!.isCollapsed).toBe(false); // selection intact
+    expect(main.querySelectorAll('p').length).toBe(1); // and no phantom paragraph
+  });
+
+  it('a plain (collapsed) click on <main> still gets its caret treatment', () => {
+    const sel = window.getSelection()!;
+    sel.removeAllRanges(); // nothing selected — a genuine empty-area click
+    const before = main.querySelectorAll('p').length;
+    const evt = new MouseEvent('click', { bubbles: true, cancelable: true, clientY: 10_000 });
+    main.dispatchEvent(evt);
+    // Below the last block → a fresh paragraph is minted for the caret.
+    expect(main.querySelectorAll('p').length).toBe(before + 1);
+  });
 });

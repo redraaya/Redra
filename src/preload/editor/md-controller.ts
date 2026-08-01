@@ -343,6 +343,11 @@ export function createMdEditorController(
         return;
       }
     }
+    // A mouse-drag SELECTION ends with a click event too — and when the
+    // button is released over <main>'s padding (common when sweeping top to
+    // bottom past the last line), re-placing the caret here would wipe the
+    // selection the user just made. A live selection is untouchable.
+    if (!(win.getSelection?.()?.isCollapsed ?? true)) return;
     // Click on <main> itself (its padding / the run-out below the last
     // block). Left alone, Chromium collapses the caret BETWEEN child blocks
     // of the container and renders it as tall as the whole content — the
