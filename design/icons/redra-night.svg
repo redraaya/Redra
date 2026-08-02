@@ -1,0 +1,18 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Redra app icon, night appearance (approved 2026-08-02, variant A).
+       Same grid and glyph geometry as redra.svg; Apple dark-icon
+       convention — dark gradient squircle, the glyph keeps the brand red.
+       Not shipped in the .icns yet: a separate dark Dock icon needs the
+       Icon Composer asset format (actool); kept here as the design source. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#303032"/>
+      <stop offset="1" stop-color="#19191B"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <g fill="#E2532F">
+    <rect x="278.64" y="184.96" width="161.21" height="664.45"/>
+    <rect x="597.74" y="184.96" width="161.21" height="326.78"/>
+  </g>
+</svg>

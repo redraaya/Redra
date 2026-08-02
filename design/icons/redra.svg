@@ -1,21 +1,15 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <!-- Redra app icon — concept B ("r + caret"), approved in Stage 0.
+  <!-- Redra app icon — "two bars" (author's design, approved 2026-08-02).
        Apple Big Sur icon grid: the visible squircle is 824×824 centered on
        a TRANSPARENT 1024 canvas (margins 100px each side), corner radius
-       ≈185 for that size — so the Dock size matches neighboring apps.
-       Background #D9482B, white geometric lowercase «r» + caret bar.
-       The glyph group keeps the approved 1024-canvas geometry, scaled by
-       0.8 about the canvas center (translate (1024−1024·0.8)/2 = 102.4)
-       so it stays optically centered inside the squircle. -->
+       ≈185 — so the Dock size matches neighboring apps.
+       Glyph: two top-aligned vertical bars — a full-height stem and a
+       half-height arm, gap ≈ one bar width (a minimal lowercase "r").
+       Geometry comes from the author's 788×788 SVG mapped onto the 824
+       squircle: scale 824/788, offset +100. -->
   <rect x="100" y="100" width="824" height="824" rx="185" fill="#D9482B"/>
-  <g transform="translate(102.4 102.4) scale(0.8)">
-    <g fill="none" stroke="#FFFFFF" stroke-width="62" stroke-linecap="round">
-      <!-- stem: baseline 672, x-height top 372 -->
-      <path d="M 388 403 L 388 641"/>
-      <!-- shoulder: branches from the stem, quarter-arc to the upper right -->
-      <path d="M 388 500 A 128 128 0 0 1 516 372"/>
-    </g>
-    <!-- caret bar, blinking white in the mockup; gap ≈ 69 from the r -->
-    <rect x="616" y="345" width="50" height="354" rx="25" fill="#FFFFFF"/>
+  <g fill="#EBEBEB">
+    <rect x="278.64" y="184.96" width="161.21" height="664.45"/>
+    <rect x="597.74" y="184.96" width="161.21" height="326.78"/>
   </g>
 </svg>
